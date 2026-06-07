@@ -1,0 +1,56 @@
+name: Build EXE
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller `
+            --onefile `
+            --windowed `
+            --name "utau-jrkhh" `
+            --add-data "list.txt;." `
+            --hidden-import=scipy `
+            --hidden-import=sounddevice `
+            --hidden-import=_sounddevice_data `
+            --hidden-import=soundfile `
+            --hidden-import=matplotlib.backends.backend_tkagg `
+            --hidden-import=PIL._tkinter_finder `
+            --collect-data=sounddevice `
+            --collect-submodules=scipy `
+            main.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: utau-jrkhh
+          path: dist/utau-jrkhh.exe
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/utau-jrkhh.exe
+          generate_release_notes: true
