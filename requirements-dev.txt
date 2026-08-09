@@ -1,0 +1,7 @@
+# JRH 核心开发/QA 依赖（不含 GUI 依赖）
+pytest>=8
+pytest-cov>=5
+hypothesis>=6
+ruff>=0.8
+mypy>=1.10
+mutmut>=3.4

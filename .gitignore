@@ -16,6 +16,18 @@ perf_trace.log
 # 波形缓存
 *.npz
 
+# QA 产物
+qa-report.json
+coverage-report.json
+mutation-report.json
+clean-env-report.json
+.coverage
+.hypothesis/
+.mutant_workdir/
+
+# 虚拟环境
+.venv/
+
 # IDE
 .vscode/
 .idea/

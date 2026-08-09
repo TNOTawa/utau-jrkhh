@@ -3,6 +3,9 @@
 ## 项目概述
 基于 customtkinter + matplotlib 的桌面 GUI 工具，用于可视化管理和排序 UTAU 音源的 `oto.ini` 条目优先级。
 
+> **重要**：本仓库的主线是 `jrh/`（JRH 人力音源母版格式核心，CLI first）。
+> `src/` + `main.py` 是历史 GUI，与 JRH 核心无关。JRH 核心的约定见文末「JRH 核心」一节。
+
 ## 启动命令
 ```powershell
 cd F:\Coding\utau-jrkhh
@@ -142,6 +145,46 @@ hiragana_to_romaji(text) → str                  # 平假名 → 罗马音
 - 批量拼字：工具栏「批量拼字」，为每种辅音/元音类型配置来源，一键生成所有缺失音素
 - 保存：工具栏「保存 oto.ini」写回原文件（覆盖）
 - 撤销：工具栏「撤销更改」从磁盘重新加载
+
+## JRH 核心（主线，CLI first）
+
+> JRH 人力音源母版格式 v0.1。权威规范：`docs/JRH_SPEC.md`（需求/架构/测试见 `docs/`）。
+
+### 关键约定
+- **层级**：Asset（原素材，不可变）→ Sentence（连续片段）→ Unit（单字）。
+  Unit 身份 = 永久坐标 `s:u`；五段式别名（`1-2-ni-hao-a`）后三项**仅人类可读**，
+  程序定位一律用坐标，禁止解析后三项。
+- **唯一一套原音设定**（timing 五参数，采样点）：`offset / consonant / cutoff /
+  preutterance / overlap`；`cutoff` 为负值 = `-窗口时长`（JinrikiHelper 约定），
+  播放区间 `[offset, offset+|cutoff|]`。
+- **派生公式**（`compile_engine.py`）：FULL 原样；`$T` 过渡 =
+  `[offset, offset+consonant]`（consonant>0 才生成）；`$B` 主体 =
+  `[offset+preutterance, offset+|cutoff|]`；CV 别名 = 与 `$B` 同区域，
+  按候选分组有效顺序命名（`hao`/`hao1`/...）。毫秒换算 `round(x*1000/sr, 3)`。
+- **冻结**：`freeze` 一次性；冻结后编号只增不改、不复用（每句 `max_unit_id_ever` +
+  全局 `max_sentence_id_ever`）；改文字/边界/重分析不改变编号。
+- **选择回退**（`selection.py`）：原句连续 → FULL（前元音匹配）→ `$T`+`$B` →
+  `$B` 主体 → 语言包替代 → 缺音；同层 tie-break = 同句连续性 > 人工排序 >
+  时长/RMS 统计 > 永久编号。禁用候选永不选中。每次选择带解释。
+- **语言包**：`jrh.zh-pinyin`（标准 410 音节，`v`=ü，y/w 作声母）、`jrh.ja-romaji`。
+- **纯度**：`jrh/core` 只允许 stdlib（测试 `test_core_purity.py` 强制）；
+  audio 模块（numpy/soundfile）惰性导入。
+- **确定性**：所有 JSON `sort_keys=True`；编译/选择/报告同输入逐字节一致
+  （golden + determinism 测试）。
+
+### 常用命令
+```powershell
+python -m jrh --format json <子命令> ...   # 或安装后 jrh ...
+python qa.py          # 完整 QA（CI 同入口；--quick 跳过覆盖率/变异）
+python tools/mutate.py
+python tools/smoke_cli.py
+python tests/golden/generate_golden.py     # 修改编译规则后重新生成 golden
+```
+
+### 测试布局
+`tests/unit|integration|acceptance|golden|negative|property|regression`；
+变异测试 oracle 映射在 `tools/mutate.py` 的 `TARGETS`；等价变异白名单在
+`EQUIVALENT_WHITELIST`（新增等价判定必须给出理由）。
 
 ## 严格遵守
 
