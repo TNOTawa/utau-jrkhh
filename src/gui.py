@@ -2,7 +2,7 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import customtkinter as ctk
 
@@ -33,6 +33,8 @@ class App(ctk.CTk):
         self._current_cutoff: float = 0.0
         self._current_group: str = ""
         self._group_entries: List[OtoEntry] = []
+        self._groups: List[Tuple[str, int]] = []  # 打开音源后填充；未加载时为空
+        self._group_sort = "原始顺序"
 
         self._build_ui()
         perf_trace.disable()
@@ -59,53 +61,80 @@ class App(ctk.CTk):
         toolbar.grid_columnconfigure(3, weight=0)
         toolbar.grid_columnconfigure(4, weight=0)
 
-        ctk.CTkButton(toolbar, text="打开音源文件夹", width=130,
-                      command=self._on_open_folder).grid(
-            row=0, column=0, padx=(10, 5), pady=5)
+        ctk.CTkButton(toolbar, text="打开音源文件夹", width=130, command=self._on_open_folder).grid(
+            row=0, column=0, padx=(10, 5), pady=5
+        )
 
-        self._vcvc_btn = ctk.CTkButton(toolbar, text="生成 CVVC VC", width=120,
-                                       command=self._on_generate_vcvc)
+        self._vcvc_btn = ctk.CTkButton(
+            toolbar, text="生成 CVVC VC", width=120, command=self._on_generate_vcvc
+        )
         self._vcvc_btn.grid(row=0, column=1, padx=5, pady=5)
 
-        self._name_label = ctk.CTkLabel(
-            toolbar, text="", font=ctk.CTkFont(size=14, weight="bold"))
+        self._name_label = ctk.CTkLabel(toolbar, text="", font=ctk.CTkFont(size=14, weight="bold"))
         self._name_label.grid(row=0, column=2, padx=10, pady=5, sticky="w")
 
-        self._save_btn = ctk.CTkButton(toolbar, text="保存 oto.ini", width=110,
-                                       command=self._on_save, state="disabled")
+        self._save_btn = ctk.CTkButton(
+            toolbar, text="保存 oto.ini", width=110, command=self._on_save, state="disabled"
+        )
         self._save_btn.grid(row=0, column=3, padx=5, pady=5)
 
-        ctk.CTkButton(toolbar, text="撤销更改", width=90,
-                      fg_color="transparent", border_width=1,
-                      command=self._on_undo).grid(
-            row=0, column=4, padx=(5, 10), pady=5)
+        ctk.CTkButton(
+            toolbar,
+            text="撤销更改",
+            width=90,
+            fg_color="transparent",
+            border_width=1,
+            command=self._on_undo,
+        ).grid(row=0, column=4, padx=(5, 10), pady=5)
 
     def _build_search_bar(self):
-        search_frame = ctk.CTkFrame(
-            self, height=36, corner_radius=0, fg_color="transparent")
-        search_frame.grid(row=1, column=0, columnspan=3, sticky="ew",
-                          padx=10, pady=(5, 0))
+        search_frame = ctk.CTkFrame(self, height=36, corner_radius=0, fg_color="transparent")
+        search_frame.grid(row=1, column=0, columnspan=3, sticky="ew", padx=10, pady=(5, 0))
         search_frame.grid_columnconfigure(0, weight=1)
 
         self._search_var = tk.StringVar()
         self._search_var.trace_add("write", lambda *a: self._on_search())
         self._search_entry = ctk.CTkEntry(
-            search_frame, placeholder_text="搜索音素...",
-            textvariable=self._search_var)
+            search_frame, placeholder_text="搜索音素...", textvariable=self._search_var
+        )
         self._search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
 
         self._count_label = ctk.CTkLabel(
-            search_frame, text="", font=ctk.CTkFont(size=11),
-            text_color="#888888")
+            search_frame, text="", font=ctk.CTkFont(size=11), text_color="#888888"
+        )
         self._count_label.grid(row=0, column=1, padx=(0, 5))
 
-        ctk.CTkButton(search_frame, text="新增拼字", width=100,
-                      command=self._on_open_combine_dialog).grid(
-            row=0, column=2, padx=(5, 0))
+        ctk.CTkButton(
+            search_frame, text="新增拼字", width=100, command=self._on_open_combine_dialog
+        ).grid(row=0, column=2, padx=(5, 0))
 
-        ctk.CTkButton(search_frame, text="批量拼字", width=100,
-                      command=self._on_open_batch_dialog).grid(
-            row=0, column=3, padx=(5, 0))
+        ctk.CTkButton(
+            search_frame, text="批量拼字", width=100, command=self._on_open_batch_dialog
+        ).grid(row=0, column=3, padx=(5, 0))
+
+        # 音素分组排序方式（放搜索栏行，避免挤压左侧标题）
+        self._sort_menu = ctk.CTkOptionMenu(
+            search_frame,
+            values=["原始顺序", "按首字母", "按样本数"],
+            width=100,
+            command=self._on_group_sort_change,
+            font=ctk.CTkFont(size=10),
+        )
+        self._sort_menu.set(self._group_sort)
+        self._sort_menu.grid(row=0, column=4, padx=(5, 0))
+
+        # 是否过滤 VC 组（含空格的别名，如 `a t`）
+        self._vc_filter_var = tk.BooleanVar(value=False)
+        self._vc_filter_box = ctk.CTkCheckBox(
+            search_frame,
+            text="过滤 VC 组",
+            variable=self._vc_filter_var,
+            command=lambda: self._rebuild_group_list(),
+            font=ctk.CTkFont(size=10),
+            checkbox_width=16,
+            checkbox_height=16,
+        )
+        self._vc_filter_box.grid(row=0, column=5, padx=(5, 0))
 
     def _build_main_area(self):
         left_frame = ctk.CTkFrame(self, width=180)
@@ -116,19 +145,25 @@ class App(ctk.CTk):
         left_frame.grid_columnconfigure(1, weight=0)
         left_frame.grid_propagate(False)
 
-        ctk.CTkLabel(left_frame, text="音素分组",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     anchor="w").grid(row=0, column=0, columnspan=2,
-                                      sticky="ew", padx=8, pady=(5, 2))
+        ctk.CTkLabel(
+            left_frame, text="音素分组", font=ctk.CTkFont(size=12, weight="bold"), anchor="w"
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(5, 2))
 
         list_font = _get_cjk_font(10)
         self._group_listbox = DraggableListbox(
-            left_frame, draggable=False, on_select=self._on_group_select,
-            bg="#2b2b2b", fg="#d4d4d4",
-            selectbackground="#264f78", selectforeground="#ffffff",
-            font=list_font, activestyle="none",
+            left_frame,
+            draggable=False,
+            on_select=self._on_group_select,
+            bg="#2b2b2b",
+            fg="#d4d4d4",
+            selectbackground="#264f78",
+            selectforeground="#ffffff",
+            font=list_font,
+            activestyle="none",
             exportselection=False,
-            borderwidth=0, highlightthickness=0)
+            borderwidth=0,
+            highlightthickness=0,
+        )
         self._group_listbox.grid(row=1, column=0, sticky="nsew")
 
         gs = ctk.CTkScrollbar(left_frame, command=self._group_listbox.yview)
@@ -150,20 +185,25 @@ class App(ctk.CTk):
         mid_frame.grid_propagate(False)
 
         self._group_header = ctk.CTkLabel(
-            mid_frame, text="样本列表",
-            font=ctk.CTkFont(size=12, weight="bold"), anchor="w")
-        self._group_header.grid(row=0, column=0, columnspan=2,
-                                sticky="ew", padx=8, pady=(5, 2))
+            mid_frame, text="样本列表", font=ctk.CTkFont(size=12, weight="bold"), anchor="w"
+        )
+        self._group_header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(5, 2))
 
         self._entry_listbox = DraggableListbox(
-            mid_frame, draggable=True,
+            mid_frame,
+            draggable=True,
             on_reorder=self._on_entry_reorder,
             on_select=self._on_entry_select,
-            bg="#2b2b2b", fg="#d4d4d4",
-            selectbackground="#264f78", selectforeground="#ffffff",
-            font=list_font, activestyle="none",
+            bg="#2b2b2b",
+            fg="#d4d4d4",
+            selectbackground="#264f78",
+            selectforeground="#ffffff",
+            font=list_font,
+            activestyle="none",
             exportselection=False,
-            borderwidth=0, highlightthickness=0)
+            borderwidth=0,
+            highlightthickness=0,
+        )
         self._entry_listbox.grid(row=1, column=0, sticky="nsew")
 
         es = ctk.CTkScrollbar(mid_frame, command=self._entry_listbox.yview)
@@ -172,21 +212,18 @@ class App(ctk.CTk):
 
         self._entry_listbox.bind("<Up>", self._on_key_up)
         self._entry_listbox.bind("<Down>", self._on_key_down)
-        self._entry_listbox.bind("<Delete>",
-                                 lambda e: self.audio_player.stop())
+        self._entry_listbox.bind("<Delete>", lambda e: self.audio_player.stop())
         self._entry_listbox.bind("<MouseWheel>", self._on_entry_wheel)
 
         right_frame = ctk.CTkFrame(self)
-        right_frame.grid(row=2, column=2, sticky="nsew",
-                         padx=(2, 10), pady=10)
+        right_frame.grid(row=2, column=2, sticky="nsew", padx=(2, 10), pady=10)
         right_frame.grid_rowconfigure(0, weight=1)
         right_frame.grid_rowconfigure(1, weight=0)
         right_frame.grid_rowconfigure(2, weight=0)
         right_frame.grid_columnconfigure(0, weight=1)
 
         self._waveform = WaveformDisplay(right_frame, width=550, height=320)
-        self._waveform.get_widget().grid(
-            row=0, column=0, sticky="nsew", padx=5, pady=(5, 2))
+        self._waveform.get_widget().grid(row=0, column=0, sticky="nsew", padx=5, pady=(5, 2))
 
         self._build_player_controls(right_frame)
         self._build_detail_panel(right_frame)
@@ -197,18 +234,22 @@ class App(ctk.CTk):
         ctrl_frame.grid_columnconfigure(1, weight=1)
 
         self._play_btn = ctk.CTkButton(
-            ctrl_frame, text="播放", width=80, command=self._on_play_stop)
+            ctrl_frame, text="播放", width=80, command=self._on_play_stop
+        )
         self._play_btn.grid(row=0, column=0, padx=(0, 5))
 
-        ctk.CTkButton(ctrl_frame, text="停止", width=60,
-                      fg_color="transparent", border_width=1,
-                      command=self._on_stop).grid(
-            row=0, column=1, padx=5, sticky="w")
+        ctk.CTkButton(
+            ctrl_frame,
+            text="停止",
+            width=60,
+            fg_color="transparent",
+            border_width=1,
+            command=self._on_stop,
+        ).grid(row=0, column=1, padx=5, sticky="w")
 
     def _build_detail_panel(self, parent):
         detail_frame = ctk.CTkFrame(parent)
-        detail_frame.grid(row=2, column=0, sticky="ew",
-                          padx=10, pady=(2, 10))
+        detail_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(2, 10))
         detail_frame.grid_columnconfigure(1, weight=1)
 
         labels = [
@@ -222,18 +263,14 @@ class App(ctk.CTk):
         ]
         self._detail_labels = {}
         for i, (label_text, key) in enumerate(labels):
-            ctk.CTkLabel(detail_frame, text=label_text,
-                         font=ctk.CTkFont(size=10),
-                         text_color="#888888").grid(
-                row=i, column=0, sticky="w", padx=8, pady=1)
-            val = ctk.CTkLabel(detail_frame, text="",
-                               font=ctk.CTkFont(size=10,
-                                                family="Consolas"))
+            ctk.CTkLabel(
+                detail_frame, text=label_text, font=ctk.CTkFont(size=10), text_color="#888888"
+            ).grid(row=i, column=0, sticky="w", padx=8, pady=1)
+            val = ctk.CTkLabel(detail_frame, text="", font=ctk.CTkFont(size=10, family="Consolas"))
             val.grid(row=i, column=1, sticky="w", padx=8, pady=1)
             self._detail_labels[key] = val
 
-        self._detail_labels["detail_wav"].configure(
-            wraplength=180, justify="left")
+        self._detail_labels["detail_wav"].configure(wraplength=180, justify="left")
 
     # ── data loading ─────────────────────────────────────────
 
@@ -245,28 +282,42 @@ class App(ctk.CTk):
         self._rebuild_group_list()
 
         name = self.oto_bank.character_name or folder_path.name
-        self._name_label.configure(
-            text=f"音源: {name}  ({len(self.oto_bank.entries)} 条目)")
-        self._save_btn.configure(
-            state="normal" if self.oto_bank.entries else "disabled")
+        self._name_label.configure(text=f"音源: {name}  ({len(self.oto_bank.entries)} 条目)")
+        self._save_btn.configure(state="normal" if self.oto_bank.entries else "disabled")
+
+    def _visible_groups(self) -> List[Tuple[str, int]]:
+        """当前显示序（排序 + VC 过滤 + 搜索过滤）的分组列表。
+
+        渲染与索引映射共用同一份，保证「显示顺序 = 点击取到的分组」。
+        """
+        items = list(self._groups)
+        if self._group_sort == "按首字母":
+            items.sort(key=lambda b_c: hiragana_to_romaji(b_c[0]))
+        elif self._group_sort == "按样本数":
+            items.sort(key=lambda b_c: (-b_c[1], hiragana_to_romaji(b_c[0])))
+        if self._vc_filter_var.get():
+            items = [bc for bc in items if " " not in bc[0]]
+        query = self._search_var.get().strip().lower()
+        if query:
+            items = [(b, c) for b, c in items if query in b.lower()]
+        return items
+
+    def _on_group_sort_change(self, value: str):
+        self._group_sort = value
+        self._rebuild_group_list()
 
     def _rebuild_group_list(self):
         self._group_listbox.delete(0, tk.END)
-        query = self._search_var.get().strip().lower()
-        visible = 0
-        total = 0
-        for base, count in self._groups:
-            total += 1
-            if query and query not in base.lower():
-                continue
+        items = self._visible_groups()
+        total = len(self._groups)
+        for base, count in items:
             roma = hiragana_to_romaji(base)
             if roma != base:
                 label = f"  {base:<6s} ({count}) {roma}"
             else:
                 label = f"  {base:<6s} ({count})"
             self._group_listbox.insert(tk.END, label)
-            visible += 1
-        self._update_count_label(visible, total)
+        self._update_count_label(len(items), total)
 
     def _update_count_label(self, visible: int, total: int):
         if visible < total:
@@ -278,8 +329,7 @@ class App(ctk.CTk):
         """拼字应用后刷新主窗口列表并定位到目标分组。"""
         self._groups = self.oto_bank.get_groups()
         self._rebuild_group_list()
-        self._save_btn.configure(
-            state="normal" if self.oto_bank.entries else "disabled")
+        self._save_btn.configure(state="normal" if self.oto_bank.entries else "disabled")
         idx = self._get_filtered_group_index(target_base)
         if idx >= 0:
             self._group_listbox.selection_clear(0, tk.END)
@@ -288,25 +338,16 @@ class App(ctk.CTk):
             self._on_group_select(idx)
 
     def _get_group_base_by_index(self, list_index: int) -> Optional[str]:
-        query = self._search_var.get().strip().lower()
-        idx = 0
-        for base, count in self._groups:
-            if query and query not in base.lower():
-                continue
-            if idx == list_index:
-                return base
-            idx += 1
+        items = self._visible_groups()
+        if 0 <= list_index < len(items):
+            return items[list_index][0]
         return None
 
     def _get_filtered_group_index(self, base: str) -> int:
-        query = self._search_var.get().strip().lower()
-        idx = 0
-        for b, _ in self._groups:
-            if query and query not in b.lower():
-                continue
+        items = self._visible_groups()
+        for i, (b, _) in enumerate(items):
             if b == base:
-                return idx
-            idx += 1
+                return i
         return -1
 
     def _populate_entry_list(self, base: str):
@@ -314,11 +355,8 @@ class App(ctk.CTk):
         self._group_entries = self.oto_bank.get_group_entries(base)
         self._entry_listbox.delete(0, tk.END)
         for i, e in enumerate(self._group_entries):
-            self._entry_listbox.insert(
-                tk.END,
-                f"  {i:>2d}  {e.alias:<8s}  {e.wav_filename}")
-        self._group_header.configure(
-            text=f"样本 — {base} ({len(self._group_entries)} 条)")
+            self._entry_listbox.insert(tk.END, f"  {i:>2d}  {e.alias:<8s}  {e.wav_filename}")
+        self._group_header.configure(text=f"样本 — {base} ({len(self._group_entries)} 条)")
 
     # ── event handlers ───────────────────────────────────────
 
@@ -373,28 +411,20 @@ class App(ctk.CTk):
             activeforeground="#ffffff",
             borderwidth=0,
         )
-        menu.add_command(
-            label="改名", command=lambda: self._open_rename_dialog(base)
-        )
-        menu.add_command(
-            label="合并到...", command=lambda: self._open_merge_dialog(base)
-        )
+        menu.add_command(label="改名", command=lambda: self._open_rename_dialog(base))
+        menu.add_command(label="合并到...", command=lambda: self._open_merge_dialog(base))
         menu.post(event.x_root, event.y_root)
         return "break"
 
     def _open_rename_dialog(self, base: str):
         from .phoneme_group_dialog import RenameGroupDialog
 
-        RenameGroupDialog(
-            self, self.oto_bank, base, on_done=self._refresh_after_group_op
-        )
+        RenameGroupDialog(self, self.oto_bank, base, on_done=self._refresh_after_group_op)
 
     def _open_merge_dialog(self, base: str):
         from .phoneme_group_dialog import MergeGroupDialog
 
-        MergeGroupDialog(
-            self, self.oto_bank, base, on_done=self._refresh_after_group_op
-        )
+        MergeGroupDialog(self, self.oto_bank, base, on_done=self._refresh_after_group_op)
 
     def _refresh_after_group_op(self):
         self._groups = self.oto_bank.get_groups()
@@ -403,9 +433,7 @@ class App(ctk.CTk):
         self._group_entries.clear()
         self._current_group = ""
         self._waveform.clear()
-        self._save_btn.configure(
-            state="normal" if self.oto_bank.entries else "disabled"
-        )
+        self._save_btn.configure(state="normal" if self.oto_bank.entries else "disabled")
 
     def _on_entry_select(self, list_index: int):
         self._display_entry(list_index)
@@ -413,8 +441,7 @@ class App(ctk.CTk):
     def _on_entry_reorder(self, from_idx: int, to_idx: int):
         if not self._current_group:
             return
-        self.oto_bank.reorder_group_entry(
-            self._current_group, from_idx, to_idx)
+        self.oto_bank.reorder_group_entry(self._current_group, from_idx, to_idx)
         self._populate_entry_list(self._current_group)
         self._entry_listbox.selection_clear(0, tk.END)
         self._entry_listbox.selection_set(to_idx)
@@ -449,16 +476,11 @@ class App(ctk.CTk):
 
         self._detail_labels["detail_alias"].configure(text=entry.alias)
         self._detail_labels["detail_wav"].configure(text=entry.wav_filename)
-        self._detail_labels["detail_offset"].configure(
-            text=f"{entry.offset:.1f} ms")
-        self._detail_labels["detail_consonant"].configure(
-            text=f"{entry.consonant:.1f} ms")
-        self._detail_labels["detail_cutoff"].configure(
-            text=f"{entry.cutoff:.1f} ms")
-        self._detail_labels["detail_preutterance"].configure(
-            text=f"{entry.preutterance:.1f} ms")
-        self._detail_labels["detail_overlap"].configure(
-            text=f"{entry.overlap:.1f} ms")
+        self._detail_labels["detail_offset"].configure(text=f"{entry.offset:.1f} ms")
+        self._detail_labels["detail_consonant"].configure(text=f"{entry.consonant:.1f} ms")
+        self._detail_labels["detail_cutoff"].configure(text=f"{entry.cutoff:.1f} ms")
+        self._detail_labels["detail_preutterance"].configure(text=f"{entry.preutterance:.1f} ms")
+        self._detail_labels["detail_overlap"].configure(text=f"{entry.overlap:.1f} ms")
 
         if self.oto_bank.folder_path:
             wav_path = self.oto_bank.folder_path / entry.wav_filename
@@ -467,10 +489,14 @@ class App(ctk.CTk):
                 self._current_offset = entry.offset
                 self._current_cutoff = entry.cutoff
                 self._waveform.load_with_oto(
-                    wav_path, entry.offset, entry.consonant, entry.cutoff,
-                    entry.overlap, entry.preutterance)
-                self.audio_player.play_segment(
-                    wav_path, entry.offset, entry.cutoff)
+                    wav_path,
+                    entry.offset,
+                    entry.consonant,
+                    entry.cutoff,
+                    entry.overlap,
+                    entry.preutterance,
+                )
+                self.audio_player.play_segment(wav_path, entry.offset, entry.cutoff)
                 self._play_btn.configure(text="暂停")
             else:
                 self._current_wav_path = None
@@ -489,15 +515,13 @@ class App(ctk.CTk):
 
     def _on_open_combine_dialog(self):
         if not self.oto_bank.folder_path or not self._current_group:
-            messagebox.showwarning(
-                "未加载音源", "请先打开音源文件夹并选择一个分组")
+            messagebox.showwarning("未加载音源", "请先打开音源文件夹并选择一个分组")
             return
         PhonemeCombineDialog(self, self.oto_bank, self._current_group)
 
     def _on_open_batch_dialog(self):
         if not self.oto_bank.folder_path:
-            messagebox.showwarning(
-                "未加载音源", "请先打开音源文件夹")
+            messagebox.showwarning("未加载音源", "请先打开音源文件夹")
             return
         BatchCombineDialog(self, self.oto_bank)
 
@@ -516,11 +540,11 @@ class App(ctk.CTk):
             messagebox.showerror(
                 "不是 JRH 项目",
                 "所选文件夹缺少 manifest.json。\n"
-                "请选择 JRH 母版项目（如 x.jrh），而非普通音源文件夹。")
+                "请选择 JRH 母版项目（如 x.jrh），而非普通音源文件夹。",
+            )
             return
         self._vcvc_btn.configure(state="disabled", text="编译中...")
-        threading.Thread(
-            target=self._vcvc_worker, args=(project_path,), daemon=True).start()
+        threading.Thread(target=self._vcvc_worker, args=(project_path,), daemon=True).start()
 
     def _vcvc_worker(self, project_path: Path):
         """后台线程执行 jrh compile --cvvc（进程内复用 CLI，主线程零阻塞）。"""
@@ -541,27 +565,24 @@ class App(ctk.CTk):
     def _vcvc_done(self, project_path: Path, code: int, detail: str):
         self._vcvc_btn.configure(state="normal", text="生成 CVVC VC")
         if code != 0:
-            messagebox.showerror(
-                "CVVC 编译失败", detail or f"编译退出码 {code}")
+            messagebox.showerror("CVVC 编译失败", detail or f"编译退出码 {code}")
             return
         build_dir = project_path / "builds" / "openutau-jrh"
         if not (build_dir / "oto.ini").exists():
-            messagebox.showerror(
-                "编译产物缺失", f"未找到编译产物：\n{build_dir}")
+            messagebox.showerror("编译产物缺失", f"未找到编译产物：\n{build_dir}")
             return
         self._load_bank(build_dir)
         messagebox.showinfo(
-            "完成",
-            "CVVC 编译完成，已打开产物目录（含 VC 衔接音素条目，如 a k）。\n"
-            f"{build_dir}")
+            "完成", f"CVVC 编译完成，已打开产物目录（含 VC 衔接音素条目，如 a k）。\n{build_dir}"
+        )
 
     def _on_save(self):
         if not self.oto_bank.folder_path:
             return
         self.oto_bank.save()
         messagebox.showinfo(
-            "保存成功",
-            f"oto.ini 已保存到:\n{self.oto_bank.folder_path / 'oto.ini'}")
+            "保存成功", f"oto.ini 已保存到:\n{self.oto_bank.folder_path / 'oto.ini'}"
+        )
 
     def _on_undo(self):
         if not self.oto_bank.folder_path:
@@ -578,8 +599,8 @@ class App(ctk.CTk):
             self._play_btn.configure(text="播放")
         elif self._current_wav_path:
             self.audio_player.play_segment(
-                self._current_wav_path,
-                self._current_offset, self._current_cutoff)
+                self._current_wav_path, self._current_offset, self._current_cutoff
+            )
             self._play_btn.configure(text="暂停")
 
     def _on_space_preview(self, event=None):
@@ -600,8 +621,7 @@ class App(ctk.CTk):
             return "break"
         idx = selection[0]
         if idx > 0:
-            self.oto_bank.reorder_group_entry(
-                self._current_group, idx, idx - 1)
+            self.oto_bank.reorder_group_entry(self._current_group, idx, idx - 1)
             self._populate_entry_list(self._current_group)
             new_idx = idx - 1
             self._entry_listbox.selection_clear(0, tk.END)
@@ -618,8 +638,7 @@ class App(ctk.CTk):
             return "break"
         idx = selection[0]
         if idx < len(self._group_entries) - 1:
-            self.oto_bank.reorder_group_entry(
-                self._current_group, idx, idx + 1)
+            self.oto_bank.reorder_group_entry(self._current_group, idx, idx + 1)
             self._populate_entry_list(self._current_group)
             new_idx = idx + 1
             self._entry_listbox.selection_clear(0, tk.END)
@@ -655,25 +674,24 @@ class App(ctk.CTk):
     # ── global shortcuts ─────────────────────────────────────
 
     def _bind_global_shortcuts(self):
-        self.bind_all('<Key-q>', self._on_prev_group)
-        self.bind_all('<Key-e>', self._on_next_group)
-        self.bind_all('<Key-w>', self._on_zoom_in)
-        self.bind_all('<Key-s>', self._on_zoom_out)
-        self.bind_all('<Key-a>', self._on_pan_left)
-        self.bind_all('<Key-d>', self._on_pan_right)
-        self.bind_all('<Key-1>', lambda e: self._on_set_marker("offset", e))
-        self.bind_all('<Key-2>', lambda e: self._on_set_marker("overlap", e))
-        self.bind_all('<Key-3>', lambda e: self._on_set_marker("preutterance", e))
-        self.bind_all('<Key-4>', lambda e: self._on_set_marker("consonant", e))
-        self.bind_all('<Key-5>', lambda e: self._on_set_marker("cutoff", e))
-        self.bind_all('<space>', self._on_space_preview)
+        self.bind_all("<Key-q>", self._on_prev_group)
+        self.bind_all("<Key-e>", self._on_next_group)
+        self.bind_all("<Key-w>", self._on_zoom_in)
+        self.bind_all("<Key-s>", self._on_zoom_out)
+        self.bind_all("<Key-a>", self._on_pan_left)
+        self.bind_all("<Key-d>", self._on_pan_right)
+        self.bind_all("<Key-1>", lambda e: self._on_set_marker("offset", e))
+        self.bind_all("<Key-2>", lambda e: self._on_set_marker("overlap", e))
+        self.bind_all("<Key-3>", lambda e: self._on_set_marker("preutterance", e))
+        self.bind_all("<Key-4>", lambda e: self._on_set_marker("consonant", e))
+        self.bind_all("<Key-5>", lambda e: self._on_set_marker("cutoff", e))
+        self.bind_all("<space>", self._on_space_preview)
 
     def _is_typing_widget(self) -> bool:
         focus = self.focus_get()
         if focus is None:
             return False
-        return focus.winfo_class() in (
-            'Entry', 'Text', 'TEntry', 'TCombobox', 'Spinbox')
+        return focus.winfo_class() in ("Entry", "Text", "TEntry", "TCombobox", "Spinbox")
 
     def _on_prev_group(self, event=None):
         if self._is_typing_widget():
@@ -756,23 +774,18 @@ class App(ctk.CTk):
                 length = 0.1
             entry.cutoff = -length
 
-        self._detail_labels["detail_offset"].configure(
-            text=f"{entry.offset:.1f} ms")
-        self._detail_labels["detail_consonant"].configure(
-            text=f"{entry.consonant:.1f} ms")
-        self._detail_labels["detail_cutoff"].configure(
-            text=f"{entry.cutoff:.1f} ms")
-        self._detail_labels["detail_preutterance"].configure(
-            text=f"{entry.preutterance:.1f} ms")
-        self._detail_labels["detail_overlap"].configure(
-            text=f"{entry.overlap:.1f} ms")
+        self._detail_labels["detail_offset"].configure(text=f"{entry.offset:.1f} ms")
+        self._detail_labels["detail_consonant"].configure(text=f"{entry.consonant:.1f} ms")
+        self._detail_labels["detail_cutoff"].configure(text=f"{entry.cutoff:.1f} ms")
+        self._detail_labels["detail_preutterance"].configure(text=f"{entry.preutterance:.1f} ms")
+        self._detail_labels["detail_overlap"].configure(text=f"{entry.overlap:.1f} ms")
 
         if self._current_wav_path and self._current_wav_path.exists():
             self._current_offset = entry.offset
             self._current_cutoff = entry.cutoff
             self._waveform.update_params(
-                entry.offset, entry.consonant, entry.cutoff,
-                entry.overlap, entry.preutterance)
+                entry.offset, entry.consonant, entry.cutoff, entry.overlap, entry.preutterance
+            )
 
         return "break"
 

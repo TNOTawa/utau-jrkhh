@@ -24,7 +24,7 @@ EXPECTED_VC = [
         3,
         {
             "offset": 226.757,
-            "consonant": 634.921,
+            "consonant": 507.937,
             "cutoff": -634.921,
             "preutterance": 226.757,
             "overlap": 113.379,
@@ -36,7 +36,7 @@ EXPECTED_VC = [
         2,
         {
             "offset": 340.136,
-            "consonant": 521.542,
+            "consonant": 417.234,
             "cutoff": -521.542,
             "preutterance": 204.082,
             "overlap": 102.041,
@@ -48,7 +48,7 @@ EXPECTED_VC = [
         4,
         {
             "offset": 1190.476,
-            "consonant": 306.122,
+            "consonant": 244.898,
             "cutoff": -306.122,
             "preutterance": 170.068,
             "overlap": 85.034,
@@ -60,7 +60,7 @@ EXPECTED_VC = [
         5,
         {
             "offset": 1587.302,
-            "consonant": 226.757,
+            "consonant": 181.406,
             "cutoff": -226.757,
             "preutterance": 90.703,
             "overlap": 45.351,
@@ -72,7 +72,7 @@ EXPECTED_VC = [
         2,
         {
             "offset": 340.136,
-            "consonant": 340.136,
+            "consonant": 272.109,
             "cutoff": -340.136,
             "preutterance": 204.082,
             "overlap": 102.041,
@@ -84,7 +84,7 @@ EXPECTED_VC = [
         2,
         {
             "offset": 340.136,
-            "consonant": 385.488,
+            "consonant": 308.39,
             "cutoff": -385.488,
             "preutterance": 204.082,
             "overlap": 102.041,
@@ -139,10 +139,11 @@ class TestJaVcCompile:
         )
         a_t = next(e for e in result.entries if e.alias == "a t")
         # pre = 20000*0.4 = 8000；offset = 20000-8000 = 12000；
-        # window = 38000-12000 = 26000；overlap = 8000*0.6 = 4800
+        # window = 38000-12000 = 26000；overlap = 8000*0.6 = 4800；
+        # consonant = window − 20% 元音尾（= 26000*0.8 = 20800）
         assert a_t.params == {
             "offset": 272.109,
-            "consonant": 589.569,
+            "consonant": 471.655,
             "cutoff": -589.569,
             "preutterance": 181.406,
             "overlap": 108.844,

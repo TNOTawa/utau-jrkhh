@@ -1,0 +1,2864 @@
+我看完你现在的仓库、JRH v0.1 规范、TextGrid2oto，以及 DiffSinger 社区目前的 `dataset-tools / HubertFA` 路线后，结论比较明确：
+
+**项目方向没有根本性问题，而且你现在“JRH 母版 → 编译到 UTAU/OpenUtau”的架构，比直接做一个 TextGrid2oto 式转换器更有长期价值。** 但在真正开始训练 Multilingual Phone-CTC 之前，我认为有几个架构问题最好现在处理，否则后面从 CVVC 走向自定义音素器、中日英多语言时会比较痛苦。
+
+你现在的核心已经刻意保持纯 stdlib、无 ASR/GPU/模型依赖，这个决定应该保留。当前结构明确是 `Asset → Sentence → Unit`，而且模型、GUI、OpenUtau 都不进入 core。([GitHub][1])
+
+---
+
+## 最核心的问题：现在 JRH 的“真相层”还是太 UTAU 了
+
+你现在 v0.1 里，`Unit` 的权威数据实际上还是：
+
+```text
+Unit
+├── label = hao
+└── timing
+    ├── offset
+    ├── consonant
+    ├── cutoff
+    ├── preutterance
+    └── overlap
+```
+
+而规范甚至明确把这五个参数称为“唯一一套原音设定”。([GitHub][2])
+
+对于现在做 CVVC，这很好。
+
+但对于你想做的最终系统：
+
+> 原始干声 → 自动识别 → 自动 G2P → 音素对齐 → 自动生成音源 → 自定义音素器
+
+这五个参数不应该再是最底层的 acoustic ground truth。
+
+因为 Phone-CTC、SOFA、HubertFA 真正知道的是：
+
+```text
+n      1.030 ~ 1.086
+i      1.086 ~ 1.421
+h      1.421 ~ 1.488
+ao     1.488 ~ 1.920
+```
+
+也就是：
+
+> **音素是什么、从哪里开始、在哪里结束。**
+
+它并不知道：
+
+```text
+overlap 应该放多少？
+preutterance 应该向前多少？
+cutoff 应该留多少稳定元音？
+VC 区间取多长？
+```
+
+其中一部分是声学边界，另一部分其实是**UTAU 合成策略参数**。
+
+所以这里一定要拆开。
+
+---
+
+# 我建议 JRH v0.2 增加一层 `PhoneAlignment`
+
+不要删除现在的 Unit，也不要推翻 v0.1。
+
+而是变成：
+
+```text
+Asset
+└── Sentence
+    ├── Transcript
+    ├── Pronunciation
+    ├── PhoneAlignment
+    │
+    │   n    ███
+    │   i       █████████
+    │   h                ██
+    │   ao                 ████████
+    │
+    └── Unit
+        ├── label = "ni"
+        ├── phones = [n, i]
+        └── timing = UTAU compatibility data
+```
+
+例如底层可以保存：
+
+```json
+{
+  "phones": [
+    {
+      "symbol": "zh/n",
+      "start_sample": 49440,
+      "end_sample": 52128,
+      "confidence": 0.97,
+      "unit_id": "1:1"
+    },
+    {
+      "symbol": "zh/i",
+      "start_sample": 52128,
+      "end_sample": 68160,
+      "confidence": 0.99,
+      "unit_id": "1:1"
+    }
+  ]
+}
+```
+
+注意：
+
+**时间仍然用你现在 JRH 的 source sample coordinate。**
+
+这个设计非常适合你目前的 source timeline 思路，而且避免：
+
+```text
+16 kHz 模型时间
+↓
+float seconds
+↓
+48 kHz 原素材
+↓
+多轮 round
+↓
+累计漂移
+```
+
+模型输出最后统一映射回 Asset 原始采样点。
+
+---
+
+# 然后 UTAU CVVC 应该变成“编译规则”
+
+也就是以后：
+
+```text
+PhoneAlignment
+       │
+       ├── utau.zh-cvvc-v1
+       │        ↓
+       │     oto.ini
+       │
+       ├── utau.ja-vcv-v1
+       │        ↓
+       │     oto.ini
+       │
+       ├── utau.ja-cvvc-v1
+       │
+       └── JRH native phonemizer
+```
+
+例如：
+
+```text
+[n] [i] [h] [ao]
+       ↑
+     ni | hao
+```
+
+CVVC profile 决定：
+
+```text
+VC 从哪里到哪里
+CV 从哪里到哪里
+preutterance 怎么算
+overlap = 辅音长度 × 某比例？
+consonant 放在哪个 landmark？
+```
+
+这才是正确的职责划分。
+
+所以我甚至建议以后字段变成：
+
+```json
+"timing": {
+    "source": "derived",
+    "profile": "utau.zh-cvvc.v1",
+    "offset": ...,
+    "consonant": ...,
+    "cutoff": ...,
+    "preutterance": ...,
+    "overlap": ...
+}
+```
+
+人工改过则：
+
+```json
+"source": "manual"
+```
+
+这样你现在的所有功能都不用废。
+
+---
+
+# 这也解释了为什么 TextGrid2oto 值得参考，但不能照着它长
+
+TextGrid2oto 本质是：
+
+```text
+录音内容/文件名
+       ↓
+      LAB
+       ↓
+SOFA / HubertFA
+       ↓
+   TextGrid
+       ↓
+TextGrid → oto rules
+       ↓
+    oto.ini
+```
+
+其 README 现在明确把自己定义成把 TextGrid 转换为 oto 等标记的程序，并要求 wav 名称中的拼音/假名与实际音频内容对应。([GitHub][3])
+
+这个路径对于：
+
+> “我要快速做一个 UTAU 音源”
+
+很好。
+
+但你的目标其实更大：
+
+> “我要保存原始素材的语音学分析，并能编译成不同的采样/音素系统。”
+
+所以你应该是：
+
+```text
+                   ┌→ CVVC
+                   │
+Phone Timeline ────┼→ VCV
+                   │
+                   ├→ CV
+                   │
+                   ├→ OpenUtau
+                   │
+                   └→ JRH native
+```
+
+而不是：
+
+```text
+Phone Timeline → oto.ini → 再想办法反推别的东西
+```
+
+---
+
+## 还有一个许可证问题不要忽略
+
+你的 JRH 当前是 MIT。([GitHub][4])
+
+而 TextGrid2oto 是 **GPL-3.0**。([GitHub][3])
+
+所以：
+
+> **可以参考思想和输入输出，但我不建议把它的实现代码直接复制进 JRH 的 MIT Core。**
+
+最好自己实现：
+
+```text
+TextGrid parser
+PhoneAlignment
+TimingProfile
+oto compiler
+```
+
+算法并不复杂，也更适合你自己的数据结构。
+
+---
+
+# DiffSinger 社区现在的方向其实和你的想法越来越像
+
+这点很有意思。
+
+现在 OpenVPI 的 `dataset-tools` 已经不是一个“大工具”了，而是拆成：
+
+| 组件          | 作用                           |
+| ----------- | ---------------------------- |
+| AudioSlicer | 自动切音频                        |
+| MinLabel    | G2P/文本标注                     |
+| LyricFA     | 歌词/文本级 alignment             |
+| HubertFA    | **phoneme forced alignment** |
+| GameInfer   | audio-to-MIDI                |
+
+而且 HubertFA 明确输出 Praat TextGrid。([GitHub][5])
+
+这其实证明：
+
+> **ASR / G2P / Forced Alignment / 输出转换，本来就应该分层。**
+
+和我们之前讨论的：
+
+```text
+TranscriberProvider
+G2PProvider
+AlignerProvider
+```
+
+基本是同一路线。
+
+所以你现在 `JRH Core` 不依赖模型这个决定是对的。
+
+---
+
+# 但是我会在中间再加一个统一接口
+
+未来完整流水线建议变成：
+
+```text
+                  Raw Audio / Video
+                          │
+                          ▼
+                  SegmentationProvider
+                          │
+                          ▼
+                     Sentence
+                          │
+             ┌────────────┴────────────┐
+             │                         │
+        已知歌词/文本                无文本
+             │                         │
+             │                  TranscriberProvider
+             │                         │
+             └────────────┬────────────┘
+                          ▼
+                     Normalizer
+                          │
+                          ▼
+                      G2PProvider
+                          │
+                          ▼
+                   Phone Sequence
+                          │
+                          │
+                  Audio ──┤
+                          ▼
+                   AlignerProvider
+                          │
+                          ▼
+                  AlignmentGraph
+                ★ 统一中间表示 ★
+                          │
+              ┌───────────┴───────────┐
+              ▼                       ▼
+        JRH Unit Builder        TextGrid Export
+              │
+              ▼
+         TimingProfile
+        /      |       \
+      CV      CVVC      VCV
+                       │
+                       ▼
+                    oto.ini
+```
+
+真正关键的是：
+
+## `AlignmentGraph`
+
+不要让：
+
+```text
+SOFA TextGrid
+```
+
+成为内部格式。
+
+也不要让：
+
+```text
+HubertFA TextGrid
+```
+
+成为内部格式。
+
+统一转换成你自己的：
+
+```text
+AlignmentGraph
+```
+
+例如里面同时有：
+
+```text
+Transcript
+Word
+Syllable / Mora
+Phone
+Silence
+Breath
+Confidence
+Provider provenance
+```
+
+以后：
+
+```text
+SOFA
+HubertFA
+MFA
+你自己的 Phone-CTC
+```
+
+都只是 importer。
+
+---
+
+# 第二个比较大的问题：现在 Unit = “单字”，英语进来以后会出问题
+
+你现在正式规范里写的是：
+
+> Unit = 句内单字。([GitHub][2])
+
+普通话暂时基本没问题：
+
+```text
+你 → ni
+好 → hao
+```
+
+日语已经开始有点模糊：
+
+```text
+今日
+```
+
+到底：
+
+```text
+今 + 日
+```
+
+还是：
+
+```text
+きょ + う
+```
+
+还是：
+
+```text
+k + y + o +:
+```
+
+？
+
+英语更明显：
+
+```text
+strength
+```
+
+一个 orthographic word：
+
+```text
+s t r ɛ ŋ θ
+```
+
+根本不存在“一字一个发音 Unit”。
+
+所以我建议现在就把语义稍微改成：
+
+> **Unit = Selection / Pronunciation Unit**
+
+中文默认一个汉字对应一个 Unit。
+
+日语默认一个 mora 或 syllable。
+
+英语以后可以：
+
+```text
+syllable
+```
+
+或者：
+
+```text
+phone group
+```
+
+永久编号机制完全可以保留。
+
+你的《计划.md》早期其实已经讨论过这一点，把 Unit 定义为比“音素”更宽泛的选择单位；我认为那个定义反而比现在 v0.1 的“单字”更适合最终目标。([GitHub][6])
+
+---
+
+# 第三个问题：不要急着“统一中日音素”
+
+我之前说 Multilingual Phone-CTC 可以做统一 Phone Set。
+
+结合你这个真实项目后，我会把建议稍微改一下。
+
+第一版不要：
+
+```text
+中文 sh
+日语 sh
+英语 SH
+       ↓
+       sh
+```
+
+全部强制合成一个 token。
+
+建议：
+
+```text
+zh/sh
+ja/sh
+en/SH
+```
+
+先分开。
+
+但是：
+
+```text
+shared HuBERT encoder
+```
+
+共用。
+
+也就是：
+
+```text
+                   Shared Encoder
+                         │
+                         ▼
+                   One CTC Head
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+       zh/sh           ja/sh          en/SH
+```
+
+以后实验证明某些 phone 确实适合共享，再 merge。
+
+这个思路实际上和 HubertFA 当前配置很接近：它默认开启 `language_prefix`，支持 `zh / ja / en` 字典，而 phoneme merging 默认关闭，只提供可选 merge groups。([GitHub][7])
+
+对你的项目来说这是非常合理的。
+
+---
+
+# 第四个问题：你“不手工标训练数据”的想法完全可行，但不要直接复制 HubertFA 训练法
+
+HubertFA 目前训练 FA 模型要求：
+
+```text
+name
+ph_seq
+ph_dur
+```
+
+也就是：
+
+```text
+音素序列
++
+每个音素 duration
+```
+
+已有边界监督。([GitHub][8])
+
+你不想人工标注的话，我反而建议：
+
+## 第一代自研模型坚持 CTC
+
+训练数据只需要：
+
+```text
+audio
++
+transcript
+```
+
+之后：
+
+```text
+transcript
+ ↓
+G2P
+ ↓
+phone sequence
+ ↓
+CTC loss
+```
+
+完全不要求：
+
+```text
+ph_dur
+```
+
+所以可以大规模自动处理公开数据。
+
+---
+
+# 公开数据其实够你做第一代了
+
+例如普通话 speech，AISHELL-3 本身约 **85 小时、218 名说话人**，并直接提供汉字与拼音级 transcription。([arXiv][9])
+
+普通话 singing，M4Singer 有多歌手、多风格和精细 alignment；Opencpop 则是约 **5.2 小时、3756 个 utterance**，并已经有 phoneme/note boundaries。([M4Singer][10])
+
+日语方面，JVS-MuSiC 有 **100 位歌手**，并且这些歌手还有对应 JVS speech 数据，这种 speech↔singing 配对对你的任务特别好。([Google Sites][11])
+
+更极端的是 ReazonSpeech，目前公开规模已经到 **35,000 小时日语 speech**。([Reazon][12])
+
+所以：
+
+> **你不缺 speech。**
+
+真正缺的是：
+
+> **许可清晰、歌手足够多、允许模型训练/权重分发的 singing data。**
+
+---
+
+# “公开可下载”与“可以训练你将来分发的模型”不是一回事
+
+这可能是整个项目最容易踩坑的地方。
+
+例如：
+
+M4Singer 的公开镜像/使用协议常见为 **CC BY-NC-SA 4.0**。([GitHub][13])
+
+JVS-MuSiC 的公开音频默认允许学术研究、非商业研究和个人使用；商业使用需要另行联系。([Google Sites][11])
+
+Opencpop 虽然非常适合做 alignment benchmark，但常见许可信息为 **CC BY-NC-ND 4.0**，而且获取本身涉及许可申请。([VoxKitchen][14])
+
+ReazonSpeech 的**模型**是 Apache-2.0，但目前 35,000h **语料**使用 CDLA-Sharing-1.0，并明确附带“信息解析”用途条件。([Reazon][12])
+
+所以建议你的训练仓库从第一天就维护：
+
+```text
+datasets.yaml
+```
+
+至少记录：
+
+```text
+name
+language
+domain
+hours
+speakers
+transcript
+phone_boundary
+license
+commercial_train
+weight_redistribution
+dataset_redistribution
+source
+```
+
+这个以后会救命。
+
+---
+
+# 我建议甚至准备两套模型
+
+一种：
+
+```text
+JRH Research Model
+```
+
+可以使用各种 NC research corpus。
+
+另一种：
+
+```text
+JRH Redistributable Model
+```
+
+只训练：
+
+```text
+许可明确允许的 corpus
+```
+
+这样你以后不需要因为模型许可证问题把整个软件分发策略重做。
+
+---
+
+# 第五个问题：全自动流水线里，真正最难的不一定是 Forced Alignment
+
+如果用户提供文本：
+
+```text
+audio
++
+lyrics
+```
+
+后面的：
+
+```text
+G2P
+Phone CTC
+Forced Alignment
+```
+
+其实已经比较好做。
+
+但你的人力音源场景很可能是：
+
+```text
+一段动画
+一段说话
+一段清唱
+一段歌曲干声
+```
+
+没有 transcript。
+
+那么最难的一步可能反而是：
+
+> **歌声歌词识别。**
+
+speech ASR：
+
+```text
+中文
+日语
+英语
+```
+
+都很成熟。
+
+但是 singing：
+
+```text
+高音
+拉长
+滑音
+气声
+假声
+辅音弱化
+吞字
+```
+
+会明显让普通 ASR 性能下降。
+
+DiffSinger 社区现在也是把这件事情拆开的：`LyricFA` 负责歌词层，`HubertFA` 负责 phone-level FA；目前 LyricFA 主力还是中文，日英处于 beta。([GitHub][5])
+
+所以你的产品最好允许两种入口：
+
+```text
+Audio only
+```
+
+和：
+
+```text
+Audio + optional transcript
+```
+
+有歌词时千万不要强制 ASR 重猜一次。
+
+---
+
+# 第六个问题：全自动不等于“不需要 Confidence”
+
+我认为你的最终目标完全可以是：
+
+```text
+用户放一个 wav
+↓
+最后得到可用 JRH
+```
+
+但内部一定要留：
+
+```text
+confidence
+```
+
+例如：
+
+```text
+ASR confidence
+G2P confidence
+phone alignment confidence
+boundary confidence
+language confidence
+```
+
+最后：
+
+```text
+0.95+
+直接生成
+
+0.75~0.95
+黄色警告
+
+<0.75
+标记 questionable
+```
+
+这对你的人力音源候选排序甚至非常有用。
+
+你现在 selection engine 已经考虑：
+
+```text
+候选优先级
+连续性
+人工排序
+RMS
+时长
+```
+
+以后再加：
+
+```text
+alignment_confidence
+transcription_confidence
+```
+
+会非常自然。
+
+---
+
+# 第七个问题：模型最好永远不要进入 JRH Core
+
+你现在：
+
+```text
+dependencies = []
+```
+
+audio 甚至只是 optional `numpy + soundfile`。([GitHub][4])
+
+这个优势我建议坚决保留。
+
+最终：
+
+```text
+jrh-core
+~ 很小
+```
+
+模型包单独：
+
+```text
+jrh-aligner
+```
+
+甚至：
+
+```text
+models/
+  jrh-phone-ctc-base-int8.onnx
+```
+
+运行时：
+
+```text
+onnxruntime
+```
+
+就够了。
+
+这方面 DiffSinger 新 dataset-tools 已经走到了类似方向：它现在把多种模型做成独立应用，并使用 ONNX Runtime，Windows 上支持 DirectML，Mac/Linux 也支持。([GitHub][15])
+
+所以你没必要把：
+
+```text
+PyTorch
+Transformers
+CUDA
+```
+
+塞进最终用户软件。
+
+---
+
+# 如果现在让我调整你的路线
+
+我会把后面的开发顺序定成这样：
+
+1. **JRH v0.1 不动，作为已稳定基线。**
+2. 做 `JRH v0.2 Alignment Extension`，加入 `Transcript / Pronunciation / PhoneSpan / Confidence / Provider metadata`。
+3. 定义统一 `AlignmentProvider`，先接 **SOFA / HubertFA**，不用训练任何模型。
+4. 做 `PhoneAlignment → CVVC` 的 `TimingProfile`，让你现在的 UTAU 功能全部跑通。
+5. 再加中文、日语 G2P。
+6. 加 speech ASR，形成真正的 `audio → JRH`。
+7. 建公开数据自动预处理仓库：dataset → normalize → G2P → JSONL。
+8. 用公开 speech + singing 数据训练第一代 **Multilingual Phone-CTC**。
+9. 用公开的人工精标 singing corpus 做 test set，不自己手标。
+10. 导出 ONNX INT8，把自研模型作为新的 `AlignerProvider`。
+11. 最后开发 JRH native phonemizer，让它直接消费 **Unit + PhoneAlignment + source continuity**，而不是依赖 CVVC。
+
+这里面我认为 **2、3、4 比现在马上租卡训练模型更优先**。
+
+因为模型以后一定能换。
+
+但是一旦：
+
+```text
+Phone boundary
+→ 被直接写死为 UTAU 五参数
+```
+
+后面要改自己的音素器，就得重新改整个数据结构。
+
+---
+
+## 最终我对这个项目现在状态的评价
+
+技术方向我认为已经从：
+
+> **“UTAU 自动原音设定工具”**
+
+变成了一个更有意思的东西：
+
+> **“从任意连续人声素材中自动建立可追溯的音素级声学素材库，并按不同 synthesis frontend 编译。”**
+
+这其实比 TextGrid2oto 高一层。
+
+TextGrid2oto 更像：
+
+```text
+Alignment → oto
+```
+
+DiffSinger Dataset Tools 更像：
+
+```text
+Dataset → Alignment
+```
+
+而 JRH 可以做成：
+
+```text
+Raw media
+    ↓
+Transcription
+    ↓
+Pronunciation
+    ↓
+Phone Alignment
+    ↓
+Source-aware Unit Database
+    ↓
+Candidate Selection
+    ↓
+┌──────────┬───────────┬──────────────┐
+UTAU CVVC  OpenUtau    JRH Phonemizer
+```
+
+**现在最大的设计修改只有一句话：不要再让 UTAU 五参数成为未来自动标注系统的最底层真相；把“音素时间轴”提升为一等数据。**
+
+如果这个改动确定下来，我下一步建议就直接和你一起把 **`JRH v0.2 Alignment Extension` 的数据结构**定下来，包括 `PhoneSpan / Syllable / Word / Breath / SP / AP / confidence / provider / model_version` 怎么存，以及**怎么从 PhoneSpan 自动计算中文 CVVC、日语 VCV/CVVC 的五参数**。这一步定完之后，模型训练的接口也基本就定死了。
+
+[1]: https://github.com/TNOTawa/utau-jrkhh/blob/main/docs/ARCHITECTURE.md "utau-jrkhh/docs/ARCHITECTURE.md at main · TNOTawa/utau-jrkhh · GitHub"
+[2]: https://github.com/TNOTawa/utau-jrkhh/blob/main/docs/JRH_SPEC.md "utau-jrkhh/docs/JRH_SPEC.md at main · TNOTawa/utau-jrkhh · GitHub"
+[3]: https://github.com/xiaobaijunya/TextGrid2oto "GitHub - xiaobaijunya/TextGrid2oto: TextGrid2oto，一个把标注模型生成的TextGrid标记转换为oto的软件 · GitHub"
+[4]: https://github.com/TNOTawa/utau-jrkhh/blob/main/pyproject.toml "utau-jrkhh/pyproject.toml at main · TNOTawa/utau-jrkhh · GitHub"
+[5]: https://github.com/openvpi/dataset-tools "GitHub - openvpi/dataset-tools: DiffSinger dataset processing tools, including audio processing, labeling. · GitHub"
+[6]: https://github.com/TNOTawa/utau-jrkhh/blob/main/%E8%AE%A1%E5%88%92.md "utau-jrkhh/计划.md at main · TNOTawa/utau-jrkhh · GitHub"
+[7]: https://github.com/wolfgitpr/HubertFA/blob/main/configs/force_alignment.yaml?utm_source=chatgpt.com "HubertFA/configs/force_alignment.yaml at main · wolfgitpr/HubertFA · GitHub"
+[8]: https://github.com/wolfgitpr/HubertFA?utm_source=chatgpt.com "GitHub - wolfgitpr/HubertFA: Hubert-based Forced Aligner · GitHub"
+[9]: https://arxiv.org/abs/2010.11567?utm_source=chatgpt.com "AISHELL-3: A Multi-speaker Mandarin TTS Corpus and the Baselines"
+[10]: https://m4singer.github.io/?utm_source=chatgpt.com "M4Singer"
+[11]: https://sites.google.com/site/shinnosuketakamichi/research-topics/jvs_music?utm_source=chatgpt.com "Shinnosuke Takamichi (高道 慎之介) - jvs_music"
+[12]: https://research.reazon.jp/projects/ReazonSpeech/index.html?utm_source=chatgpt.com "ReazonSpeech - Reazon Human Interaction Lab"
+[13]: https://github.com/Joshua-1995/Singing-finetuned-DAC/blob/main/scripts/DATASETS.md?utm_source=chatgpt.com "Singing-finetuned-DAC/scripts/DATASETS.md at main · Joshua-1995/Singing-finetuned-DAC · GitHub"
+[14]: https://voxkitchen.readthedocs.io/en/latest/datasets/opencpop/?utm_source=chatgpt.com "Opencpop - VoxKitchen"
+[15]: https://github.com/openvpi/dataset-tools?utm_source=chatgpt.com "GitHub - openvpi/dataset-tools: DiffSinger dataset processing tools, including audio processing, labeling. · GitHub"
+
+可以。结合你现在仓库的实际状态，我建议先把一个原则定死：
+
+> **JRH v0.1 不再继续往里面塞自动标注逻辑，视为已经封板的“人工母版 + 编译/选择核心”；JRH v0.2 则正式引入 Alignment Extension，把“音素时间轴”提升为一等数据。**
+
+这样后面无论接 SOFA、HubertFA、MFA，还是你自己训练 Multilingual Phone-CTC，都不会再碰 v0.1 已经稳定的核心逻辑。
+
+---
+
+# 一、先 review 一下 JRH v0.1：我认为可以正式封板
+
+这里要区分两个概念：
+
+* **JRH v0.1 自己定义的范围：已经完成。**
+* **你现在设想的“全自动音源流水线”：当然远没有完成，因为它本来就在 FUTURE 里。**
+
+仓库的最终验证报告已经明确宣布 v0.1 Stable Implementation 完成，MUST-001～026 全部实现；382 个测试全部通过，`jrh/core + jrh/formats` 行覆盖率 96.9%，232 个 mutation 中有效 mutation 全部杀灭，并做了 clean-env 从创建项目到编译、删除产物、重建逐字节一致的完整验证。([GitHub][1])
+
+| v0.1 模块                    | 当前状态 | 我对它的判断                |
+| -------------------------- | ---- | --------------------- |
+| Asset → Sentence → Unit    | ✅    | 已稳定，不要推翻              |
+| source sample timeline     | ✅    | **以后 Alignment 继续沿用** |
+| 永久 `s:u` 坐标                | ✅    | 非常有价值，保留              |
+| freeze / ID 不复用            | ✅    | 保留                    |
+| 五参数 Timing                 | ✅    | 保留，但 v0.2 中不再是最底层声学事实 |
+| FULL / `$T` / `$B` / CV 编译 | ✅    | **完全复用**              |
+| L1～L6 Candidate Selection  | ✅    | 继续复用                  |
+| Candidate Groups           | ✅    | 继续复用                  |
+| OpenUtau 薄适配层              | ✅    | 架构正确                  |
+| zh-pinyin / ja-romaji      | ✅基础版 | 自动流水线需要更完整 G2P        |
+| CLI                        | ✅    | v0.2 延续 CLI-first     |
+| Core 纯 stdlib              | ✅    | **绝对不要破坏**            |
+| QA / regression / mutation | ✅    | v0.2 应继承相同门槛          |
+| 静音自动分句                     | ❌    | v0.2+                 |
+| ASR                        | ❌    | v0.2+ provider        |
+| G2P Provider               | ❌    | v0.2+                 |
+| Forced Aligner             | ❌    | **v0.2 核心新增**         |
+| Breath / SP / AP           | ❌    | v0.2 Alignment 可顺便解决  |
+| 英语                         | ❌    | 后续                    |
+| 自训练模型                      | ❌    | 后续模型层                 |
+
+这些未实现项其实也完全符合原计划：当前 REQUIREMENTS 把 ASR、G2P、SOFA、呼吸音、英语、CV/CVVC/VCV 多目标编译等都明确列为 FUTURE；尚未完成的 SHOULD 主要是 oto 反导入、内置静音分句和 ZIP 容器。([GitHub][2])
+
+所以我会把当前版本定义成：
+
+> **JRH v0.1 = “Manual Master Core” 完成。**
+
+不要再把“自动对齐没有做”理解成 v0.1 没做完。
+
+还有一个目前比较明显、但不值得回头修 v0.1 的限制：中文 `lyric_to_units` 内置汉字表目前只是约 70 个常用字，表外字需要输入拼音。自动流水线以后应该由真正的 G2P Provider 接管，而不是继续扩这个硬编码表。([GitHub][1])
+
+---
+
+# 二、JRH v0.2 的核心定义
+
+我建议把正式名字定为：
+
+**JRH v0.2 Alignment Extension**
+
+它解决的不是：
+
+> “怎么运行 SOFA？”
+
+而是：
+
+> **“任何模型得到的文本、发音和音素时间边界，在 JRH 里应该如何统一表示、编辑、追踪，并进一步生成现有 Unit + Timing。”**
+
+新的逻辑关系变成：
+
+```text
+Asset
+ │
+ └── Sentence
+      │
+      ├── AlignmentGraph        ← v0.2 新增
+      │    │
+      │    ├── Transcript
+      │    ├── PronunciationUnit
+      │    ├── PhoneSpan
+      │    └── EventSpan
+      │
+      └── Unit                  ← v0.1 保留
+           │
+           ├── label
+           ├── Timing
+           └── timing_provenance
+```
+
+于是完整流水线变成：
+
+```text
+Raw Audio
+    │
+Segmentation
+    │
+Sentence
+    │
+Transcription
+    │
+Normalizer
+    │
+G2P
+    │
+Phone Sequence
+    │
+Forced Alignment
+    │
+    ▼
+AlignmentGraph      ★ 声学真相层
+    │
+TimingProfile
+    │
+    ▼
+Unit + Timing       ★ 合成/选择层
+    │
+现有 compile_engine
+    │
+    ▼
+oto.ini / OpenUtau / CVVC
+```
+
+这意味着你现在几乎整套 `compile_engine`、`selection.py`、candidate group 都不用重写。
+
+---
+
+# 三、最重要的数据结构：`data/alignments.json`
+
+我建议**不要把 PhoneSpan 直接塞进 `units.json`**。
+
+新增独立文件：
+
+```text
+data/
+├── assets.json
+├── sentences.json
+├── units.json
+├── candidate_groups.json
+├── analysis.json
+└── alignments.json          # v0.2 新增
+```
+
+一个 Sentence 对应一个当前有效 AlignmentGraph。
+
+建议第一版结构大致这样：
+
+```json
+{
+  "alignments": [
+    {
+      "sentence_id": 1,
+      "revision": 3,
+      "language": "zh",
+      "phone_set": "jrh.phone.v1",
+
+      "transcript": {
+        "raw": "你好",
+        "normalized": "你好",
+        "source": "asr",
+        "confidence": 0.96
+      },
+
+      "pronunciation": {
+        "provider": {
+          "name": "jrh-g2p-zh",
+          "version": "0.2.0"
+        },
+
+        "units": [
+          {
+            "id": "pr-001",
+            "kind": "syllable",
+            "surface": "你",
+            "reading": "ni3",
+            "phone_range": [0, 2]
+          },
+          {
+            "id": "pr-002",
+            "kind": "syllable",
+            "surface": "好",
+            "reading": "hao3",
+            "phone_range": [2, 4]
+          }
+        ]
+      },
+
+      "alignment": {
+        "provider": {
+          "name": "jrh-phone-ctc",
+          "version": "0.1.0",
+          "model": "jrh-multilingual-phone-ctc-base",
+          "model_version": "2026.08"
+        },
+        "confidence_metric": "mean_frame_posterior"
+      },
+
+      "phones": [
+        {
+          "symbol": "zh/n",
+          "start_sample": 58120,
+          "end_sample": 60740,
+          "confidence": 0.94,
+          "source": "model"
+        },
+        {
+          "symbol": "zh/i",
+          "start_sample": 60740,
+          "end_sample": 73810,
+          "confidence": 0.98,
+          "source": "model"
+        }
+      ],
+
+      "events": [
+        {
+          "type": "breath",
+          "subtype": "in",
+          "start_sample": 54500,
+          "end_sample": 57000,
+          "confidence": 0.91,
+          "source": "model"
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+# 四、这里我会做几个很重要的决定
+
+| 项目                        | v0.2 决定                             |
+| ------------------------- | ----------------------------------- |
+| Phone 时间                  | **Asset 原始时间轴上的整数 sample**          |
+| Phone ID                  | 不做永久业务身份                            |
+| Phone 顺序                  | 数组顺序就是声学顺序                          |
+| PronunciationUnit → phone | half-open `phone_range=[begin,end)` |
+| Phone symbol              | 默认语言命名空间，如 `zh/n`、`ja/n`            |
+| Silence                   | 不当普通 phone                          |
+| Breath                    | 不当普通 phone                          |
+| SP/AP                     | 作为 EventSpan 语义，导出时可映射成 SP/AP       |
+| 模型 logits                 | **不进入 JRH 权威数据**                    |
+| TextGrid                  | 交换格式，不是内部权威格式                       |
+| 模型名称/版本                   | 必须记录                                |
+| confidence                | 可为空，模型有则保存                          |
+| 手工调整                      | 必须明确记录，不允许模型静默覆盖                    |
+
+其中时间坐标尤其重要。
+
+v0.1 的 Sentence 本身已经保存 Asset 时间轴上的 `start_sample/end_sample`，而 Unit Timing 则是句内 samples。([GitHub][3])
+
+所以我建议：
+
+### Alignment 使用 Asset absolute samples
+
+例如：
+
+```text
+Asset
+0 ------------------------------------------ 2,000,000 samples
+
+Sentence 1
+       57600 ---------------- 172800
+
+Phone
+          61200 ---- 64300
+```
+
+PhoneSpan：
+
+```text
+start_sample = 61200
+end_sample   = 64300
+```
+
+而不是：
+
+```text
+3600
+6700
+```
+
+这样将来重新切 Sentence：
+
+```text
+sentence.start_sample:
+57600 → 56000
+```
+
+音素本身的位置完全不用改。
+
+---
+
+# 五、模型用 16kHz 没关系
+
+比如 Asset 是：
+
+```text
+48000 Hz
+```
+
+模型：
+
+```text
+16000 Hz
+```
+
+模型给：
+
+```text
+model sample = 20000
+```
+
+Provider adapter 在写入 JRH 前负责映射：
+
+```text
+source_sample =
+sentence.start_sample
++
+round(model_position × source_sr / model_sr)
+```
+
+最终 JRH Core **永远不知道什么 16k HuBERT、10ms frame、20ms frame**。
+
+Core 只知道：
+
+```text
+Asset Sample Timeline
+```
+
+这和 v0.1 已经采用“采样点为权威，毫秒只在编译时转换”的原则完全一致。当前 ADR 本来就是为了避免采样率变化带来的累计误差。([GitHub][4])
+
+---
+
+# 六、PronunciationUnit 是解决中日英兼容的关键
+
+我现在不建议再让：
+
+> Unit = 汉字
+
+成为 v0.2 的语言学定义。
+
+但也**不要直接修改现有 Unit 的结构**。
+
+增加一个新的：
+
+```text
+PronunciationUnit
+```
+
+它可以根据语言不同代表：
+
+```text
+中文
+你
+reading = ni3
+phones = zh/n zh/i
+
+日语
+きょ
+reading = kyo
+phones = ja/k ja/y ja/o
+
+英语
+strength
+某个 syllable / pronunciation chunk
+phones = en/S en/T en/R ...
+```
+
+这样：
+
+> `PronunciationUnit` = 语言学/G2P 层
+> `Unit` = JRH 合成候选层
+
+两个概念从此不绑死。
+
+这正好解决以后英语加入的问题。
+
+---
+
+# 七、中日音素第一版不要合并
+
+这一点我现在比较坚定。
+
+存：
+
+```text
+zh/n
+ja/n
+en/N
+```
+
+而不要一开始全部：
+
+```text
+n
+```
+
+模型内部以后可以共享声学表示：
+
+```text
+Shared HuBERT Encoder
+```
+
+但 JRH 存储层应该保持语言语义。
+
+例如：
+
+```text
+zh/sh
+ja/sh
+en/SH
+```
+
+未来经过实验发现：
+
+```text
+zh/sh ≈ ja/sh
+```
+
+模型可以做 phone merging。
+
+但母版不用跟着模型改变。
+
+所以建议再新增：
+
+```text
+docs/PHONESET.md
+```
+
+专门定义：
+
+> **JRH Canonical Phone Inventory**
+
+这个以后也是你训练 Multilingual Phone-CTC 的 vocabulary contract。
+
+---
+
+# 八、SP / AP / Breath 我建议现在一次设计正确
+
+不要：
+
+```text
+phones:
+[
+  "n",
+  "i",
+  "AP",
+  "h",
+  "ao"
+]
+```
+
+推荐：
+
+```text
+phones:
+n
+i
+h
+ao
+```
+
+另外：
+
+```text
+events:
+breath
+silence
+noise
+```
+
+因为：
+
+> Breath 是声学事件，不是真正 linguistic phone。
+
+如果 DiffSinger：
+
+```text
+AP
+SP
+```
+
+需要这些标签：
+
+```text
+EventSpan
+    ↓ exporter
+AP / SP
+```
+
+如果以后 JRH 自己的 phonemizer：
+
+```text
+EventSpan
+    ↓
+breath sample candidate
+```
+
+也完全没问题。
+
+---
+
+# 九、Unit 的 Timing 不删除，而是增加“来源”
+
+现在 `Unit` 是：
+
+```text
+Unit
+├── label
+├── timing
+├── enabled
+└── analysis
+```
+
+当前源码也是如此。([GitHub][5])
+
+v0.2 建议变成：
+
+```text
+Unit
+├── label
+├── timing
+├── timing_provenance   ← 新增
+├── enabled
+└── analysis
+```
+
+例如：
+
+```json
+"timing_provenance": {
+  "kind": "derived",
+  "alignment_revision": 3,
+  "profile": "jrh.utau.zh-cvvc",
+  "profile_version": "1.0",
+  "pronunciation_unit_ids": [
+    "pr-002"
+  ],
+  "manually_adjusted": false
+}
+```
+
+如果用户手动拖动了：
+
+```json
+{
+  "kind": "manual",
+  "alignment_revision": 3,
+  "profile": "jrh.utau.zh-cvvc",
+  "profile_version": "1.0",
+  "pronunciation_unit_ids": ["pr-002"],
+  "manually_adjusted": true
+}
+```
+
+### 对 v0.1 文件怎么解释？
+
+没有：
+
+```text
+timing_provenance
+```
+
+的全部默认：
+
+```text
+legacy-manual
+```
+
+即可。
+
+所以旧项目不会改变任何行为。
+
+---
+
+# 十、重新跑模型时，绝对不能自动覆盖人工 Timing
+
+这里建议引入一个很重要的概念：
+
+## Alignment Revision
+
+例如：
+
+```text
+alignment revision 3
+```
+
+重新跑模型：
+
+```text
+revision 4
+```
+
+但 Unit 是：
+
+```text
+timing_provenance.alignment_revision = 3
+```
+
+此时：
+
+```text
+derived timing
+      ↓
+STALE
+```
+
+系统可以提示：
+
+```text
+1:2 timing derived from alignment revision 3
+current alignment revision = 4
+```
+
+然后用户主动：
+
+```text
+refresh derived timing
+```
+
+才重新生成。
+
+如果：
+
+```text
+kind = manual
+```
+
+则永远：
+
+```text
+不自动覆盖
+```
+
+除非用户显式：
+
+```text
+--force
+```
+
+这是我认为 v0.2 必须有的安全机制。
+
+---
+
+# 十一、PhoneSpan → 五参数不要写死在 Aligner 里
+
+不要：
+
+```text
+SOFA Provider
+   ↓
+直接生成 oto 五参数
+```
+
+应该：
+
+```text
+SOFA
+Phone-CTC
+HubertFA
+MFA
+   │
+   ▼
+PhoneSpan
+   │
+   ▼
+TimingProfile
+   │
+   ▼
+Timing
+```
+
+建议新增一个中间结构：
+
+```text
+TimingLandmarks
+```
+
+比如：
+
+```text
+window_start
+overlap_point
+onset
+fixed_end
+window_end
+```
+
+最后统一换算：
+
+```text
+offset =
+    window_start - sentence.start_sample
+
+overlap =
+    overlap_point - window_start
+
+preutterance =
+    onset - window_start
+
+consonant =
+    fixed_end - window_start
+
+cutoff =
+    -(window_end - window_start)
+```
+
+于是现有的：
+
+```text
+Timing(
+    offset,
+    consonant,
+    cutoff,
+    preutterance,
+    overlap
+)
+```
+
+完全不用变化。
+
+这和当前 Timing 定义也是严格一致的。([GitHub][3])
+
+---
+
+# 十二、不同音源制式只需要不同 TimingProfile
+
+例如：
+
+```text
+jrh.utau.zh-cvvc.v1
+
+jrh.utau.ja-vcv.v1
+
+jrh.utau.ja-cvvc.v1
+
+jrh.utau.en-cvvc.v1
+```
+
+它们共享：
+
+```text
+PhoneSpan
+```
+
+但决定：
+
+```text
+窗口左边留多少前元音
+辅音结束点取哪里
+元音稳定区域留多少
+overlap 怎么设置
+窗口右边截在哪里
+```
+
+所以以后你调整 CVVC 标法，不需要：
+
+> 重跑 ASR
+> 重跑 G2P
+> 重跑 CTC
+
+只需要：
+
+```text
+AlignmentGraph
+      ↓
+新 TimingProfile
+      ↓
+重新生成 Units
+```
+
+这一点会非常舒服。
+
+---
+
+# 十三、Provider 层怎么设计
+
+当前 Core 明确要求纯 stdlib，并且 `audio` 也通过惰性依赖隔离；这个分层现在非常干净。([GitHub][6])
+
+v0.2 继续坚持：
+
+```text
+jrh.core
+    ↑
+绝对不 import torch
+绝对不 import transformers
+绝对不 import onnxruntime
+```
+
+新增：
+
+```text
+jrh/
+├── core/
+│   ├── alignment.py
+│   ├── timing_profile.py
+│   └── ...
+│
+├── providers/
+│   ├── base.py
+│   ├── g2p/
+│   ├── transcription/
+│   └── alignment/
+│
+└── pipeline/
+```
+
+接口大致是：
+
+```python
+class TranscriptionProvider(Protocol):
+    def transcribe(request) -> TranscriptResult:
+        ...
+
+class G2PProvider(Protocol):
+    def phonemize(request) -> PronunciationResult:
+        ...
+
+class AlignmentProvider(Protocol):
+    def align(request) -> AlignmentResult:
+        ...
+```
+
+然后：
+
+```text
+SOFA Provider
+HubertFA Provider
+MFA Provider
+Japanese HuBERT Provider
+JRH Phone-CTC Provider
+```
+
+全部只需要输出同一个：
+
+```text
+AlignmentResult
+```
+
+---
+
+# 十四、TextGrid 的定位也顺便定下来
+
+建议：
+
+```text
+TextGrid = interchange format
+```
+
+而不是：
+
+```text
+TextGrid = JRH internal data
+```
+
+因此：
+
+```text
+SOFA TextGrid
+     ↓
+TextGrid Adapter
+     ↓
+AlignmentGraph
+```
+
+以及：
+
+```text
+AlignmentGraph
+     ↓
+TextGrid Exporter
+     ↓
+DiffSinger / Praat
+```
+
+这样你可以和：
+
+* SOFA
+* HubertFA
+* DiffSinger dataset tools
+* textgrid2oto
+
+互相交换。
+
+但 JRH 内部永远不依赖 TextGrid。
+
+---
+
+# 十五、v0.1 → v0.2 迁移必须显式
+
+这里我不建议自动升级。
+
+当前工程的 `SCHEMA_VERSION` 明确是 `0.1.0`，package 版本也是 `0.1.0`；Core 本身零运行依赖。([GitHub][7])
+
+v0.2 应该：
+
+```text
+SUPPORTED =
+0.1.0
+0.2.0
+```
+
+然后：
+
+```text
+jrh info old.jrh
+
+schema: 0.1.0
+compatible: yes
+alignment: unavailable
+```
+
+用户要升级：
+
+```text
+jrh migrate old.jrh --to 0.2
+```
+
+才：
+
+```text
+schema_version:
+0.1.0
+→
+0.2.0
+```
+
+并生成：
+
+```text
+data/alignments.json
+```
+
+### 绝对不要
+
+打开 v0.1：
+
+```text
+save
+↓
+偷偷升级 0.2
+```
+
+这样会破坏 v0.1 作为稳定母版格式的意义。
+
+---
+
+# 十六、v0.2 最重要的几个新不变量
+
+| 不变量                     | 规则                                                     |
+| ----------------------- | ------------------------------------------------------ |
+| Source Alignment        | PhoneSpan 永远对应原 Asset sample                           |
+| Monotonicity            | phone 按时间单调递增                                          |
+| Positive Span           | `start_sample < end_sample`                            |
+| Bounds                  | phone 必须落在所属 Sentence/Asset 有效范围                       |
+| Phone Sequence          | flattened Pronunciation phones 必须与 alignment phones 一致 |
+| Revision                | Alignment 修改必须增加 revision                              |
+| Manual Authority        | manual timing / boundary 不被机器静默覆盖                      |
+| Derivation Traceability | derived Timing 必须知道来自哪一版 alignment + profile           |
+| Provider Independence   | Core 不知道 torch/ONNX/SOFA                               |
+| Determinism             | 同 Alignment + Profile → 相同 Timing                      |
+| Legacy Parity           | 无 Alignment 的 v0.1 项目编译结果不得改变                          |
+
+最后这个非常关键：
+
+> **v0.2 必须有一个 golden test：同一个 v0.1 fixture 用 v0.1 和 v0.2 compiler 编译，oto/alias-map 必须完全一致。**
+
+---
+
+# 十七、Sentence split / merge 也要定义 Alignment 行为
+
+这是很容易忘掉的。
+
+因为现在 v0.1 已经支持：
+
+```text
+sentence split
+sentence merge
+```
+
+而且这两个操作都有专项回归修复。([GitHub][1])
+
+有 Alignment 后：
+
+### Split
+
+因为 PhoneSpan 是 Asset absolute samples：
+
+```text
+Sentence A
+      ↓ split
+Sentence A + Sentence B
+```
+
+Phone 不用改时间。
+
+只需要按边界分配给两个 AlignmentGraph。
+
+如果：
+
+```text
+某一个 phone 横跨 split point
+```
+
+则：
+
+> **拒绝自动 split，并要求先调整边界。**
+
+不要擅自把音素切成两半。
+
+### Merge
+
+如果两个 Sentence：
+
+```text
+same asset
+```
+
+直接合并 PhoneSpan，重新排序：
+
+```text
+revision += 1
+```
+
+即可。
+
+这就是为什么 absolute source sample 比 sentence-relative alignment 更合适。
+
+---
+
+# 十八、模型的中间 logits 不要保存进 JRH
+
+例如 Phone-CTC 得到：
+
+```text
+[T, 80]
+```
+
+的 logits。
+
+不要保存：
+
+```text
+data/logits.npy
+```
+
+作为母版的一部分。
+
+JRH 保存：
+
+```text
+phone
+start
+end
+confidence
+provider
+model_version
+```
+
+就够了。
+
+如果为了调试要缓存：
+
+```text
+cache/
+alignment/
+```
+
+并明确：
+
+> **整个 cache 可以删除重建。**
+
+否则一个本来几十 KB 的 JRH 元数据项目，很容易因为模型输出膨胀到几百 MB。
+
+---
+
+# 十九、我建议 v0.2 按这个顺序实现
+
+这部分我建议严格按顺序来，因为前面的接口一旦确定，后面训练模型就很轻松：
+
+1. **先冻结 v0.1**，不再改其规范语义，只接受 bugfix；新增 `JRH_ALIGNMENT_SPEC.md`、`PHONESET.md` 和 ADR-0003。
+2. 实现纯 stdlib 的 `AlignmentGraph / Transcript / PronunciationUnit / PhoneSpan / EventSpan`，以及 `alignments.json` 的 load/save/validate。
+3. 实现 `0.1 → 0.2` 显式 migration，并增加“v0.1 编译结果完全不变”的 golden regression。
+4. 实现 Alignment CRUD、revision、manual/derived/stale 规则，以及 Sentence split/merge 对 Alignment 的处理。
+5. 实现 TextGrid import/export，先拿现成 SOFA/HubertFA 输出把整条数据路径跑通。
+6. 实现 `TimingLandmarks + TimingProfile`，先做 `zh-cvvc`、`ja-vcv`、`ja-cvvc`。
+7. 实现 `AlignmentGraph → Unit + Timing` materializer；默认只更新 derived Unit，绝不覆盖 manual。
+8. 再定义 Transcription/G2P/Alignment Provider 接口，把 SOFA/HubertFA/Japanese HuBERT 等逐步接入。
+9. 等整条 pipeline 完全稳定以后，**才训练 JRH Multilingual Phone-CTC**；届时模型只不过是又一个 AlignmentProvider。
+10. 最后才做 `audio-only → segmentation → ASR → G2P → alignment → Unit → oto` 的一键 `jrh auto`。
+
+---
+
+# 二十、我建议 v0.2.0 本身先不要包含自训练模型
+
+我会把版本边界定成这样：
+
+| 版本         | 目标                                                                         |
+| ---------- | -------------------------------------------------------------------------- |
+| **v0.1.x** | 当前稳定人工母版 Core，仅 bugfix                                                     |
+| **v0.2.0** | **AlignmentGraph + migration + TimingProfile + TextGrid interoperability** |
+| **v0.2.x** | SOFA / HubertFA / Japanese HuBERT 等 Provider                               |
+| **v0.3**   | JRH Multilingual Phone-CTC + 自动流水线                                         |
+| 后续         | JRH Native Phonemizer                                                      |
+
+原因很简单：
+
+如果现在立刻训练模型，你很快就会遇到：
+
+```text
+模型输出到底存哪？
+SP 算 phone 吗？
+Phone 用模型自己的 vocabulary 吗？
+重新跑模型会不会覆盖人工修改？
+一个 phone 属于哪个 Unit？
+16k → 48k 坐标怎么算？
+换模型后旧工程怎么办？
+```
+
+而 **JRH v0.2 Alignment Extension 正是在模型训练前把这些协议全部固定下来。**
+
+---
+
+## 最后给 v0.2 一句话定性
+
+v0.1 是：
+
+> **Source → Unit → Timing → Synthesis**
+
+v0.2 变成：
+
+> **Source → Linguistic/Acoustic Alignment → Unit → Timing → Synthesis**
+
+其中：
+
+```text
+AlignmentGraph
+```
+
+成为**声学标注事实层**，
+
+```text
+Unit + Timing
+```
+
+退回它真正应该承担的位置：
+
+> **面向具体音源制式的合成表示层。**
+
+我认为这会是 JRH 从“UTAU 标注器”真正转向“自动音源构建平台”的那个架构分水岭，而且基本不牺牲你已经做得相当扎实的 v0.1。
+
+[1]: https://github.com/TNOTawa/utau-jrkhh/blob/main/docs/FINAL_VALIDATION_REPORT.md "utau-jrkhh/docs/FINAL_VALIDATION_REPORT.md at main · TNOTawa/utau-jrkhh · GitHub"
+[2]: https://github.com/TNOTawa/utau-jrkhh/blob/main/docs/REQUIREMENTS.md "utau-jrkhh/docs/REQUIREMENTS.md at main · TNOTawa/utau-jrkhh · GitHub"
+[3]: https://github.com/TNOTawa/utau-jrkhh/blob/main/docs/JRH_SPEC.md "utau-jrkhh/docs/JRH_SPEC.md at main · TNOTawa/utau-jrkhh · GitHub"
+[4]: https://github.com/TNOTawa/utau-jrkhh/blob/main/docs/ADR-0001-jrh-v0.1-decisions.md "utau-jrkhh/docs/ADR-0001-jrh-v0.1-decisions.md at main · TNOTawa/utau-jrkhh · GitHub"
+[5]: https://github.com/TNOTawa/utau-jrkhh/blob/main/jrh/core/model.py "utau-jrkhh/jrh/core/model.py at main · TNOTawa/utau-jrkhh · GitHub"
+[6]: https://github.com/TNOTawa/utau-jrkhh/blob/main/docs/ARCHITECTURE.md "utau-jrkhh/docs/ARCHITECTURE.md at main · TNOTawa/utau-jrkhh · GitHub"
+[7]: https://github.com/TNOTawa/utau-jrkhh/blob/main/jrh/core/project.py "utau-jrkhh/jrh/core/project.py at main · TNOTawa/utau-jrkhh · GitHub"
+
+今天我写了旧版人力V助手的格式升级与CVVC的音素补齐，刚刚git推送到了仓库，这方面更多是对旧版的兼容与拓展，你能有什么启示吗？
+
+有，而且你今天这次提交让我对我们刚才的 **JRH v0.2 Alignment Extension** 有几处比较明确的修正。你这次不是单纯“兼容旧版”，实际上已经做出了几个以后自动流水线非常重要的架构验证。
+
+### 1. 最重要的启示：旧版数据不是“历史包袱”，而是一种高优先级证据源
+
+你现在的 `import-henki` 做了一件很正确的事：
+
+```text
+旧人力V助手
+├── slices/*.wav
+├── TextGrid
+└── oto.ini
+        ↓
+       JRH
+```
+
+其中 TextGrid 用来恢复 Unit，而已有 oto.ini 的五参数则**原样优先保留**；原版候选顺序也进入 `candidate_groups`。只有没有匹配到旧 oto 时，才根据 TextGrid 估计 timing。
+
+这说明 v0.2 不能简单认为：
+
+> AI Alignment 是新的真理，旧人工标注是需要被替换的东西。
+
+更合理的是同时存在两套 authority：
+
+```text
+声学事实 authority
+manual phone boundary
+    > imported TextGrid
+    > model alignment
+    > heuristic estimate
+
+合成参数 authority
+manual JRH edit
+    > imported oto.ini
+    > TimingProfile derived
+    > heuristic estimate
+```
+
+这两套优先级**不能混成一个 `source` 字段**。
+
+所以我会把我们前面说的 `timing_provenance` 再升级一下：
+
+```text
+Alignment Provenance
+和
+Synthesis Timing Provenance
+```
+
+分开管理。
+
+这非常重要，因为一个旧 oto 的 `preutterance` 是优秀的**合成经验**，却不一定等于真实声学音素边界；而 MFA/TextGrid 的音素边界可能更接近声学事实，却未必是最好的 UTAU 参数。
+
+---
+
+# 2. 你现在其实已经在“丢掉”一批未来非常宝贵的数据
+
+这是我看完代码后认为最值得 v0.2 马上解决的地方。
+
+现在流程是：
+
+```text
+TextGrid
+   ↓
+phones tier
+   ↓
+mfa_zh / mfa_ja
+   ↓
+Mora
+   ↓
+Unit + Timing
+```
+
+`henki.py` 会真正读取 `phones` tier，中文甚至还读取 `words` tier；但在 `Unit` 建好以后，原始 phone timeline 本身没有成为 JRH 的持久数据。
+
+比如原来有：
+
+```text
+tɕʰ    1.022–1.086
+j      1.086–1.113
+ɛ      1.113–1.254
+n      1.254–1.301
+```
+
+经过当前 importer 后最后可能只剩：
+
+```text
+Unit:
+    label = qian
+    timing = ...
+```
+
+这对 v0.1 没问题。
+
+但对未来的：
+
+```text
+Phone-CTC
+自定义 phonemizer
+VCV/CVVC 转换
+对齐精度比较
+模型 benchmark
+```
+
+来说，前面的 phone 信息比 `qian` 更珍贵。
+
+所以 **v0.2 的第一批 AlignmentGraph 数据甚至已经存在了**：
+
+> 你旧版人力V助手里的 TextGrid。
+
+以后 `import-henki` 应该变成：
+
+```text
+TextGrid
+   │
+   ├────────────→ AlignmentGraph
+   │                  │
+   │                 PhoneSpan
+   │                 WordSpan
+   │                 Provider=MFA
+   │
+   └→ Mora → Unit
+```
+
+而不是：
+
+```text
+TextGrid → Mora → Unit → TextGrid 信息消失
+```
+
+这意味着你甚至不必重新跑模型，就可以让一大批旧工程直接拥有 v0.2 Alignment 数据。
+
+---
+
+# 3. `words` 层已经证明：AlignmentGraph 不能只有 PhoneSpan
+
+这一点是今天代码给我的一个很强的实证。
+
+你现在中文转换中特意使用：
+
+```python
+word_ranges
+```
+
+来判断 `n/ŋ` 是：
+
+```text
+前一个音节的韵尾
+```
+
+还是：
+
+```text
+下一个音节的声母
+```
+
+比如你自己在代码里防的：
+
+```text
+可能
+kʰ + o | n + o + ŋ
+```
+
+不能错误吞成：
+
+```text
+kon ...
+```
+
+
+
+这说明：
+
+> **单纯 Phone 时间序列不足以完整表达语言结构。**
+
+所以我会修改我们之前的 v0.2 Schema：
+
+原来是：
+
+```text
+Transcript
+PronunciationUnit
+PhoneSpan
+EventSpan
+```
+
+现在建议正式改成：
+
+```text
+AlignmentGraph
+│
+├── Transcript
+│
+├── TokenSpan / WordSpan     ← 今天的代码证明需要它
+│
+├── PronunciationUnit
+│   ├── 中文 syllable
+│   ├── 日语 mora
+│   └── 英语 syllable
+│
+├── PhoneSpan
+│
+└── EventSpan
+    ├── silence
+    ├── breath
+    └── noise
+```
+
+以后英语进来以后 `WordSpan` 更重要。
+
+---
+
+# 4. MFA 中文转换器说明：必须区分“Provider Phone”和“JRH Phone”
+
+你今天写的 `mfa_zh.py` 很有价值，但同时它也把一个潜在问题暴露得非常明显。
+
+MFA 实际给你的 phone 有：
+
+```text
+tɕ
+tɕʷ
+ɕʷ
+ʎ
+ɲ
+pʲ
+kʷ
+ɻ
+ɚ
+ʐ̩
+...
+```
+
+你目前已经针对 459 个 TextGrid、99 种音素、4005 个音节做了大量实测映射，并处理了介音吸收、唇化、腭化、鼻韵尾、儿化等问题。
+
+这反而告诉我们以后千万不要：
+
+```text
+MFA phone
+    ↓
+直接变成 JRH canonical phone
+```
+
+我建议 PhoneSpan 至少留两个字段：
+
+```json
+{
+  "symbol": "zh/tc",
+  "observed_symbol": "tɕ",
+  "provider": "mfa-mandarin",
+  "start_sample": 123456,
+  "end_sample": 126789
+}
+```
+
+也就是：
+
+```text
+observed_symbol
+      =
+模型/对齐器原样输出
+
+canonical symbol
+      =
+JRH 规范化音素
+```
+
+这样以后：
+
+```text
+MFA
+SOFA
+HubertFA
+JRH Phone-CTC
+```
+
+即使使用不同 phone inventory，也全部可以进入同一个 AlignmentGraph。
+
+而且出问题的时候你能追查：
+
+> “原模型到底输出了什么？”
+
+否则一旦映射成拼音再保存，很多声学信息已经不可逆地丢掉。
+
+---
+
+# 5. 今天的 CVVC 实现证明：以后应该拆成 Language Profile 和 Synthesis Profile
+
+现在的链路其实已经很明显：
+
+```text
+MFA IPA
+   ↓
+mfa_zh.py
+   ↓
+拼音
+   ↓
+pinyin.py
+   ↓
+presamp vowel/consonant ID
+   ↓
+CVVC alias
+```
+
+而你现在又把 `presamp.ini` 做成了单一事实来源，并核验 OpenUtau `zh-cvv` 实际就是根据 `[VOWEL] / [CONSONANT]` 生成 `{前元音ID} {辅音ID}`。([GitHub][1])
+
+所以以后我建议把目前比较宽泛的 `LanguagePack` 概念拆成：
+
+```text
+LanguageProfile
+├── normalization
+├── G2P
+├── syllable/mora rules
+└── canonical phones
+
+SynthesisProfile
+├── utau.zh-cvvc
+├── utau.ja-cvvc
+├── utau.ja-vcv
+├── openutau.zh-cvv
+└── jrh.native
+```
+
+例如：
+
+```text
+zh/n
+zh/a
+zh/ng
+       ↓
+LanguageProfile
+       ↓
+"ang"
+       ↓
+utau.zh-cvvc profile
+       ↓
+"ang t"
+```
+
+以后 JRH 自己的 phonemizer 根本不一定需要：
+
+```text
+presamp.ini
+```
+
+因此 **presamp 应该属于 UTAU 中文 CVVC Profile，而不是成为 JRH 的语言学真理。**
+
+这是今天这次兼容工作给我的一个很重要的启示。
+
+---
+
+# 6. `Timing.vc_timing()` 应该保留，但未来变成 Legacy Fallback
+
+你今天新加的 CVVC 路径目前是：
+
+```text
+Unit A Timing
+      +
+Unit B Timing
+      ↓
+Timing.vc_timing()
+      ↓
+VC
+```
+
+实际代码通过当前元音尾部、下一个 Unit 的辅音区以及 ratio 来生成 VC。
+
+这个实现**完全不应该删**。
+
+相反，它应该成为：
+
+```text
+Legacy Timing Resolver
+```
+
+未来则形成双路径：
+
+```text
+                    AlignmentGraph available?
+                         /           \
+                       yes            no
+                        │              │
+                 PhoneSpan            │
+                        │              │
+                TimingProfile     Timing.vc_timing()
+                        │              │
+                        └──────┬───────┘
+                               ↓
+                             CVVC
+```
+
+于是：
+
+### 老工程
+
+继续：
+
+```text
+五参数 → 推导 VC
+```
+
+### 新自动标注工程
+
+可以直接：
+
+```text
+[vowel end]
+[next consonant start]
+[next vowel start]
+        ↓
+精确 VC landmarks
+```
+
+这会比 ratio 更合理。
+
+也就是说今天这次开发没有成为“未来会被删掉的临时代码”，反而变成了一个非常好的：
+
+> **Backward-compatible fallback backend。**
+
+---
+
+# 7. `combine` 让我意识到：JRH 将来其实还需要第四个核心概念——Inventory
+
+你今天已经做出了：
+
+```text
+410 音节目标集合
+     ↓
+检测缺失
+     ↓
+寻找 C/V 来源
+     ↓
+近似音素 fallback
+     ↓
+crossfade
+     ↓
+生成新 Asset + Sentence + Unit
+```
+
+甚至已经有：
+
+```text
+sh ~ s
+zh ~ z
+ch ~ c
+l ~ n ~ r
+f ~ h
+前鼻 ~ 后鼻
+```
+
+这一类 fallback。([GitHub][1])
+
+这实际上已经不是 Alignment 问题了。
+
+它属于：
+
+> **Inventory Coverage Planning**
+
+因此整个 JRH 最终可能不是三层，而是四层：
+
+```text
+                Raw Media
+                   │
+                   ▼
+             AlignmentGraph
+                   │
+                   ▼
+            Source Unit Pool
+                   │
+                   ▼
+           Inventory Planner
+          /                \
+     已有素材             缺失素材
+        │                    │
+        │              combine / derive
+        │                    │
+        └─────────┬──────────┘
+                  ▼
+           Complete Inventory
+                  │
+           Synthesis Profile
+                  │
+        ┌─────────┼─────────┐
+        ▼         ▼         ▼
+      CVVC       VCV      JRH Native
+```
+
+这个我认为非常有潜力。
+
+因为将来你自研 phonemizer 后，它可以直接定义：
+
+```text
+required_inventory()
+```
+
+然后 JRH 自动回答：
+
+```text
+已有 94.2%
+可组合补齐 4.8%
+无法补齐 1.0%
+```
+
+甚至主动推荐还缺哪些音素。
+
+这比“固定 410 拼音”更泛化。
+
+---
+
+# 8. `combine` 产生的音频必须正式标记为 Derived Asset
+
+这是我现在会新增到 v0.2 设计里的东西。
+
+你现在 combine 会真正产生：
+
+```text
+C{音节}.wav
+```
+
+再成为新的：
+
+```text
+Asset + Sentence + Unit
+```
+
+([GitHub][1])
+
+现在这对使用没问题。
+
+但未来如果 JRH 同时又承担：
+
+```text
+训练数据整理
+Phone-CTC 数据导出
+模型评估
+```
+
+就有危险。
+
+因为系统可能分不清：
+
+```text
+真实录音
+```
+
+和：
+
+```text
+两个真实录音 crossfade 拼出来的音
+```
+
+所以建议 v0.2：
+
+```json
+{
+  "id": "asset-Cquan",
+  "kind": "audio",
+  "origin": "derived",
+  "derivation": {
+    "method": "phoneme-combine",
+    "sources": [
+      {
+        "asset_id": "asset-001",
+        "start_sample": 12300,
+        "end_sample": 15100
+      },
+      {
+        "asset_id": "asset-017",
+        "start_sample": 8800,
+        "end_sample": 13200
+      }
+    ],
+    "profile": "combine.zh.v1"
+  }
+}
+```
+
+原始录音则：
+
+```text
+origin = source
+```
+
+这样以后训练 Multilingual Phone-CTC 时：
+
+```text
+include origin=source
+exclude origin=derived
+```
+
+非常干净。
+
+**千万不要未来无意间拿 JRH 自己拼出来的音去训练声学对齐器。**
+
+---
+
+# 9. 今天的提交还强化了一个设计哲学：新功能尽量“增量”，而不是“改写”
+
+你今天 CVVC 的设计有一个我很喜欢的地方：
+
+> 默认编译结果仍然和历史逐字节一致；只有显式 `--cvvc` 才增加 VC。
+
+而 `export-vc` 又强调：
+
+```text
+原版 oto.ini
++
+VC / 派生 CV 追加
+```
+
+不用新功能时旧行为不变。([GitHub][1])
+
+这个模式应该直接成为 JRH 后续版本的兼容原则：
+
+```text
+旧事实不改写
+新事实作为 extension 添加
+旧输出默认不变
+新 Profile 显式启用
+```
+
+所以我会稍微修改之前对 v0.2 migration 的态度：
+
+> **Schema 的确应该正式升 0.2，因为当前 `JRHProject.open()` 明确拒绝非 `0.1.0` schema；但迁移过程应该尽可能是“附加 Alignment 数据”，而不是重新计算已有 Unit/Timing。** 
+
+也就是：
+
+```text
+v0.1
+Unit + Timing
+```
+
+迁移以后：
+
+```text
+v0.2
+Unit + Timing              ← 原封不动
++
+AlignmentGraph             ← 新增
++
+Provenance
+```
+
+而不是：
+
+```text
+AlignmentGraph
+↓
+重新生成 Timing
+↓
+把旧参数覆盖掉
+```
+
+---
+
+# 所以我现在会把 JRH v0.2 设计更新成这样
+
+| 层             | 核心对象                                          | 来源                    |
+| ------------- | --------------------------------------------- | --------------------- |
+| Source        | `Asset / Sentence`                            | v0.1                  |
+| Acoustic      | **`AlignmentGraph`**                          | v0.2                  |
+| Linguistic    | `WordSpan / PronunciationUnit / PhoneSpan`    | v0.2                  |
+| Synthesis     | `Unit / Timing`                               | v0.1 保留               |
+| Compatibility | `LegacyTimingResolver`                        | 今天的工作                 |
+| Inventory     | **`InventorySpec / Coverage / DerivedAsset`** | 今天工作启发新增              |
+| Output        | `SynthesisProfile`                            | CVVC/VCV/OpenUtau/JRH |
+
+其中我尤其建议在原先 v0.2 计划中新增三个东西：
+
+```text
+WordSpan
+
+Asset.derivation
+
+observed_phone
+    +
+canonical_phone
+```
+
+这三个并不是为了“架构漂亮”，而是你今天的真实代码已经分别证明它们有必要：
+
+```text
+words tier
+→ 防止中文错误吞韵尾
+
+MFA 99 种实际 phone
+→ provider phone ≠ JRH phone
+
+combine 生成新 wav
+→ source audio ≠ derived audio
+```
+
+---
+
+## 对我来说，今天这个提交还有一个更大的启示
+
+原先我把 JRH 理解成：
+
+> **自动把素材变成 UTAU 音源。**
+
+现在我更倾向把它定义成：
+
+> **一个可保留旧人工成果、吸收不同标注源、建立音素级声学素材库，并根据目标 phonemizer 自动完成库存与编译的中间层。**
+
+所以以后甚至不是：
+
+```text
+JRH → UTAU
+```
+
+而是：
+
+```text
+             MFA
+             SOFA
+            HubertFA
+          JRH Phone-CTC
+               │
+               ▼
+        JRH AlignmentGraph
+               │
+        Source Inventory
+               │
+      Inventory Completion
+               │
+      ┌────────┼─────────┐
+      ▼        ▼         ▼
+   old UTAU  OpenUtau  JRH Native
+    CVVC       VCV     Phonemizer
+```
+
+而你今天做的“旧版人力V助手 → JRH → 自动补齐中文 CVVC”其实已经是这套架构的**第一个端到端实例**了：只是目前输入 Alignment 来自旧 TextGrid，输出目标是 UTAU CVVC。
+
+这反而让我觉得：**下一步暂时不用急着接模型。最有价值的是先把今天 importer 已经读到但随后丢弃的 TextGrid phone/word 信息正式保存为 v0.2 AlignmentGraph。** 这样旧项目本身就会成为验证整个 v0.2 数据模型最好的真实样本。
+
+[1]: https://github.com/TNOTawa/utau-jrkhh/commit/62a021406680dbc748f8c01a314491e322d0b8c0 "feat: 新增 henki 母版导入、中文 CVVC 与 VC 补充导出（JRH §12） · TNOTawa/utau-jrkhh@62a0214 · GitHub"

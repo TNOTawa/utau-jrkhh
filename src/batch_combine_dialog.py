@@ -13,10 +13,14 @@ from .oto_parser import OtoBank, OtoEntry, get_base_phoneme, hiragana_to_romaji
 from .phoneme_combine_dialog import (
     ALL_REQUIRED_PHONEMES,
     _CONSONANT_FALLBACK,
-    _get_cv_of_base,
+    _zh_format_group_label,
     combine_audio_entries,
+    detect_bank_language,
     format_group_label,
     split_japanese_cv,
+    split_pinyin_cv,
+    zh_partition_missing,
+    zh_required_units,
 )
 from .waveform_display import WaveformDisplay
 
@@ -40,10 +44,15 @@ class BatchCombineDialog(ctk.CTkToplevel):
         # 缓存所有分组
         self._all_groups = self.oto_bank.get_groups()
 
+        # 语言自动识别（ja = 假名列表 / zh = 拼音列表）
+        self._lang = detect_bank_language([base for base, _ in self._all_groups])
+
         # 缺失音素与类型
         self._missing: List[Tuple[str, str]] = []
         self._consonant_types: List[str] = []
         self._vowel_types: List[str] = []
+        # 中文：无法拼接（零声母/未枚举）的缺失音节及原因
+        self._skipped_zh: List[Tuple[str, str]] = []
 
         # 配置: {type: {"group_base": str, "entry_index": int}}
         self._consonant_configs: Dict[str, Dict] = {}
@@ -64,8 +73,7 @@ class BatchCombineDialog(ctk.CTkToplevel):
         info_frame = ctk.CTkFrame(self, fg_color="transparent")
         info_frame.pack(fill="x", padx=12, pady=(12, 6))
 
-        self._info_label = ctk.CTkLabel(
-            info_frame, text="", font=ctk.CTkFont(size=12))
+        self._info_label = ctk.CTkLabel(info_frame, text="", font=ctk.CTkFont(size=12))
         self._info_label.pack(side="left", padx=8)
 
         # 中间左右分栏
@@ -83,79 +91,110 @@ class BatchCombineDialog(ctk.CTkToplevel):
         bottom_frame.pack(fill="x", padx=12, pady=(6, 12))
         bottom_frame.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(bottom_frame, text="缺失音素总览",
-                     font=ctk.CTkFont(size=11, weight="bold")).grid(
-            row=0, column=0, sticky="w", padx=8, pady=(8, 4))
+        ctk.CTkLabel(
+            bottom_frame, text="缺失音素总览", font=ctk.CTkFont(size=11, weight="bold")
+        ).grid(row=0, column=0, sticky="w", padx=8, pady=(8, 4))
 
-        self._overview_text = ctk.CTkTextbox(
-            bottom_frame, height=140, font=ctk.CTkFont(size=10))
-        self._overview_text.grid(row=1, column=0, sticky="nsew",
-                                  padx=8, pady=(0, 4))
+        self._overview_text = ctk.CTkTextbox(bottom_frame, height=140, font=ctk.CTkFont(size=10))
+        self._overview_text.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 4))
         self._overview_text.configure(state="disabled")
 
         btn_frame = ctk.CTkFrame(bottom_frame, fg_color="transparent")
         btn_frame.grid(row=2, column=0, sticky="e", padx=8, pady=(4, 8))
 
-        ctk.CTkButton(btn_frame, text="预览当前选中", width=120,
-                      command=self._on_preview_current).pack(
-            side="left", padx=(0, 8))
-        ctk.CTkButton(btn_frame, text="一键生成", width=120,
-                      fg_color="#2b8a3e", hover_color="#237032",
-                      command=self._on_generate_all).pack(
-            side="left", padx=4)
-        ctk.CTkButton(btn_frame, text="取消", width=100,
-                      fg_color="transparent", border_width=1,
-                      command=self._on_close).pack(
-            side="left", padx=4)
+        ctk.CTkButton(
+            btn_frame, text="预览当前选中", width=120, command=self._on_preview_current
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            btn_frame,
+            text="一键生成",
+            width=120,
+            fg_color="#2b8a3e",
+            hover_color="#237032",
+            command=self._on_generate_all,
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            btn_frame,
+            text="取消",
+            width=100,
+            fg_color="transparent",
+            border_width=1,
+            command=self._on_close,
+        ).pack(side="left", padx=4)
 
     def _build_source_panel(self, parent, column: int, title: str, prefix: str):
         frame = ctk.CTkFrame(parent)
-        frame.grid(row=0, column=column, sticky="nsew",
-                   padx=(0 if column == 0 else 6, 6 if column == 0 else 0))
-        frame.grid_rowconfigure(1, weight=2)   # 类型列表
-        frame.grid_rowconfigure(3, weight=2)   # 分组/样本列表行
-        frame.grid_rowconfigure(4, weight=3)   # 波形
+        frame.grid(
+            row=0,
+            column=column,
+            sticky="nsew",
+            padx=(0 if column == 0 else 6, 6 if column == 0 else 0),
+        )
+        frame.grid_rowconfigure(1, weight=2)  # 类型列表
+        frame.grid_rowconfigure(3, weight=2)  # 分组/样本列表行
+        frame.grid_rowconfigure(4, weight=3)  # 波形
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_columnconfigure(1, weight=1)
 
         # 类型列表
-        ctk.CTkLabel(frame, text=f"{title}类型",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     anchor="w").grid(row=0, column=0, columnspan=2,
-                                       sticky="ew", padx=8, pady=(8, 4))
+        hint = "（presamp 短 ID）" if self._lang == "zh" else ""
+        ctk.CTkLabel(
+            frame, text=f"{title}类型{hint}", font=ctk.CTkFont(size=12, weight="bold"), anchor="w"
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 4))
 
         type_lb = DraggableListbox(
-            frame, draggable=False,
+            frame,
+            draggable=False,
             on_select=getattr(self, f"_on_{prefix}_type_select"),
-            bg="#2b2b2b", fg="#d4d4d4",
-            selectbackground="#264f78", selectforeground="#ffffff",
-            font=self._list_font, activestyle="none",
-            exportselection=False, borderwidth=0, highlightthickness=0)
-        type_lb.grid(row=1, column=0, columnspan=2, sticky="nsew",
-                     padx=8, pady=4)
+            bg="#2b2b2b",
+            fg="#d4d4d4",
+            selectbackground="#264f78",
+            selectforeground="#ffffff",
+            font=self._list_font,
+            activestyle="none",
+            exportselection=False,
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        type_lb.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=8, pady=4)
         setattr(self, f"_{prefix}_type_listbox", type_lb)
 
         ts = ctk.CTkScrollbar(frame, command=type_lb.yview)
         ts.grid(row=1, column=2, sticky="ns", pady=4)
         type_lb.configure(yscrollcommand=ts.set)
 
-        type_lb.bind("<Up>", lambda e: self._handle_key_up(type_lb, getattr(self, f"_on_{prefix}_type_select")))
-        type_lb.bind("<Down>", lambda e: self._handle_key_down(type_lb, getattr(self, f"_on_{prefix}_type_select")))
-        type_lb.bind("<MouseWheel>", lambda e: self._handle_wheel(type_lb, e, getattr(self, f"_on_{prefix}_type_select")))
+        type_lb.bind(
+            "<Up>",
+            lambda e: self._handle_key_up(type_lb, getattr(self, f"_on_{prefix}_type_select")),
+        )
+        type_lb.bind(
+            "<Down>",
+            lambda e: self._handle_key_down(type_lb, getattr(self, f"_on_{prefix}_type_select")),
+        )
+        type_lb.bind(
+            "<MouseWheel>",
+            lambda e: self._handle_wheel(type_lb, e, getattr(self, f"_on_{prefix}_type_select")),
+        )
 
         # 分组列表（左）
-        ctk.CTkLabel(frame, text="来源分组",
-                     font=ctk.CTkFont(size=11, weight="bold"),
-                     anchor="w").grid(row=2, column=0,
-                                       sticky="ew", padx=8, pady=(4, 2))
+        ctk.CTkLabel(
+            frame, text="来源分组", font=ctk.CTkFont(size=11, weight="bold"), anchor="w"
+        ).grid(row=2, column=0, sticky="ew", padx=8, pady=(4, 2))
 
         group_lb = DraggableListbox(
-            frame, draggable=False,
+            frame,
+            draggable=False,
             on_select=getattr(self, f"_on_{prefix}_group_select"),
-            bg="#2b2b2b", fg="#d4d4d4",
-            selectbackground="#264f78", selectforeground="#ffffff",
-            font=self._list_font, activestyle="none",
-            exportselection=False, borderwidth=0, highlightthickness=0)
+            bg="#2b2b2b",
+            fg="#d4d4d4",
+            selectbackground="#264f78",
+            selectforeground="#ffffff",
+            font=self._list_font,
+            activestyle="none",
+            exportselection=False,
+            borderwidth=0,
+            highlightthickness=0,
+        )
         group_lb.grid(row=3, column=0, sticky="nsew", padx=(8, 2), pady=(2, 4))
         setattr(self, f"_{prefix}_group_listbox", group_lb)
 
@@ -163,23 +202,38 @@ class BatchCombineDialog(ctk.CTkToplevel):
         gs.grid(row=3, column=2, sticky="ns", pady=(2, 4))
         group_lb.configure(yscrollcommand=gs.set)
 
-        group_lb.bind("<Up>", lambda e: self._handle_key_up(group_lb, getattr(self, f"_on_{prefix}_group_select")))
-        group_lb.bind("<Down>", lambda e: self._handle_key_down(group_lb, getattr(self, f"_on_{prefix}_group_select")))
-        group_lb.bind("<MouseWheel>", lambda e: self._handle_wheel(group_lb, e, getattr(self, f"_on_{prefix}_group_select")))
+        group_lb.bind(
+            "<Up>",
+            lambda e: self._handle_key_up(group_lb, getattr(self, f"_on_{prefix}_group_select")),
+        )
+        group_lb.bind(
+            "<Down>",
+            lambda e: self._handle_key_down(group_lb, getattr(self, f"_on_{prefix}_group_select")),
+        )
+        group_lb.bind(
+            "<MouseWheel>",
+            lambda e: self._handle_wheel(group_lb, e, getattr(self, f"_on_{prefix}_group_select")),
+        )
 
         # 样本列表（右）
-        ctk.CTkLabel(frame, text="样本",
-                     font=ctk.CTkFont(size=11, weight="bold"),
-                     anchor="w").grid(row=2, column=1,
-                                       sticky="ew", padx=2, pady=(4, 2))
+        ctk.CTkLabel(frame, text="样本", font=ctk.CTkFont(size=11, weight="bold"), anchor="w").grid(
+            row=2, column=1, sticky="ew", padx=2, pady=(4, 2)
+        )
 
         entry_lb = DraggableListbox(
-            frame, draggable=False,
+            frame,
+            draggable=False,
             on_select=getattr(self, f"_on_{prefix}_entry_select"),
-            bg="#2b2b2b", fg="#d4d4d4",
-            selectbackground="#264f78", selectforeground="#ffffff",
-            font=self._list_font, activestyle="none",
-            exportselection=False, borderwidth=0, highlightthickness=0)
+            bg="#2b2b2b",
+            fg="#d4d4d4",
+            selectbackground="#264f78",
+            selectforeground="#ffffff",
+            font=self._list_font,
+            activestyle="none",
+            exportselection=False,
+            borderwidth=0,
+            highlightthickness=0,
+        )
         entry_lb.grid(row=3, column=1, sticky="nsew", padx=(2, 8), pady=(2, 4))
         setattr(self, f"_{prefix}_entry_listbox", entry_lb)
 
@@ -188,12 +242,16 @@ class BatchCombineDialog(ctk.CTkToplevel):
         entry_lb.configure(yscrollcommand=es.set)
 
         entry_lb.bind("<space>", lambda e, p=prefix: self._on_play_entry(p))
-        entry_lb.bind("<MouseWheel>", lambda e, p=prefix: self._handle_wheel(entry_lb, e, getattr(self, f"_on_{prefix}_entry_select")))
+        entry_lb.bind(
+            "<MouseWheel>",
+            lambda e, p=prefix: self._handle_wheel(
+                entry_lb, e, getattr(self, f"_on_{prefix}_entry_select")
+            ),
+        )
 
         # 波形预览
         wf = WaveformDisplay(frame, width=400, height=160)
-        wf.get_widget().grid(row=4, column=0, columnspan=4,
-                              sticky="nsew", padx=8, pady=(4, 8))
+        wf.get_widget().grid(row=4, column=0, columnspan=4, sticky="nsew", padx=8, pady=(4, 8))
         setattr(self, f"_{prefix}_waveform", wf)
 
         return frame
@@ -201,17 +259,27 @@ class BatchCombineDialog(ctk.CTkToplevel):
     # ── 初始化 ─────────────────────────────────────────────────
 
     def _setup_defaults(self):
-        self._missing = self._get_missing_phonemes()
+        missing_all = self._get_missing_phonemes()
 
-        # 提取涉及的辅音/元音类型
-        c_set = set()
-        v_set = set()
-        for hira, _ in self._missing:
-            c, v = split_japanese_cv(hira)
-            if c:
-                c_set.add(c)
-            if v:
-                v_set.add(v)
+        if self._lang == "zh":
+            combinable, self._skipped_zh = zh_partition_missing(
+                [item for item, _roma in missing_all]
+            )
+            # 只保留可拼接的（跳过项不再出现在待配置总览）
+            self._missing = [(s, s) for s, _c, _v in combinable]
+            c_set = {c for _s, c, _v in combinable}
+            v_set = {v for _s, _c, v in combinable}
+        else:
+            self._missing = missing_all
+            self._skipped_zh = []
+            c_set = set()
+            v_set = set()
+            for item, _roma in missing_all:
+                c, v = split_japanese_cv(item)
+                if c:
+                    c_set.add(c)
+                if v:
+                    v_set.add(v)
 
         self._consonant_types = sorted(c_set, key=lambda x: (-len(x), x))
         self._vowel_types = sorted(v_set)
@@ -221,17 +289,29 @@ class BatchCombineDialog(ctk.CTkToplevel):
         self._rebuild_type_list("vowel", self._vowel_types)
         self._refresh_overview()
 
+    def _split_cv(self, base: str) -> Tuple[Optional[str], Optional[str]]:
+        """按当前语言拆分 (辅音类型, 元音类型)：ja = 日语辅音/元音，zh = presamp 短 ID。"""
+        if self._lang == "ja":
+            return split_japanese_cv(base)
+        return split_pinyin_cv(base)
+
     def _get_missing_phonemes(self) -> List[Tuple[str, str]]:
         existing = {base for base, _ in self._all_groups}
-        return [(h, r) for h, r in ALL_REQUIRED_PHONEMES if h not in existing]
+        if self._lang == "ja":
+            return [(h, r) for h, r in ALL_REQUIRED_PHONEMES if h not in existing]
+        return [(s, s) for s in zh_required_units() if s not in existing]
 
     def _update_info_label(self):
         c_count = len(self._consonant_types)
         v_count = len(self._vowel_types)
-        self._info_label.configure(
-            text=f"共缺失 {len(self._missing)} 个音素，"
-                 f"涉及 {c_count} 种辅音 / {v_count} 种元音"
+        lang_name = "中文" if self._lang == "zh" else "日语"
+        text = (
+            f"[{lang_name}] 共缺失 {len(self._missing)} 个音素，"
+            f"涉及 {c_count} 种辅音 / {v_count} 种元音"
         )
+        if self._skipped_zh:
+            text += f"；跳过 {len(self._skipped_zh)} 个（零声母/未枚举）"
+        self._info_label.configure(text=text)
 
     def _rebuild_type_list(self, prefix: str, types: List[str]):
         lb = getattr(self, f"_{prefix}_type_listbox")
@@ -243,20 +323,22 @@ class BatchCombineDialog(ctk.CTkToplevel):
             lb.selection_set(0)
             getattr(self, f"_on_{prefix}_type_select")(0)
 
-    @staticmethod
-    def _format_group_label(base: str, count: int) -> str:
+    def _format_group_label(self, base: str, count: int) -> str:
+        if self._lang == "zh":
+            return _zh_format_group_label(base, count)
         return format_group_label(base, count)
 
     # ── 候选分组 ───────────────────────────────────────────────
 
     def _get_consonant_candidate_groups(self, c: str) -> List[str]:
         candidates = [c]
-        fb = _CONSONANT_FALLBACK.get(c)
-        if fb and fb != c:
-            candidates.append(fb)
+        if self._lang == "ja":
+            fb = _CONSONANT_FALLBACK.get(c)
+            if fb and fb != c:
+                candidates.append(fb)
         result = []
         for base, _ in self._all_groups:
-            bc, _ = _get_cv_of_base(base)
+            bc, _ = self._split_cv(base)
             if bc in candidates:
                 result.append(base)
         # 保底回退：找不到任何匹配候选时，开放全部音素供选择
@@ -267,7 +349,7 @@ class BatchCombineDialog(ctk.CTkToplevel):
     def _get_vowel_candidate_groups(self, v: str) -> List[str]:
         result = []
         for base, _ in self._all_groups:
-            _, bv = _get_cv_of_base(base)
+            _, bv = self._split_cv(base)
             if bv == v:
                 result.append(base)
         # 保底回退：找不到任何匹配候选时，开放全部音素供选择
@@ -275,10 +357,9 @@ class BatchCombineDialog(ctk.CTkToplevel):
             result = [base for base, _ in self._all_groups]
         return result
 
-    @staticmethod
-    def _pick_default_vowel_group(v: str, candidates: List[str]) -> Optional[str]:
+    def _pick_default_vowel_group(self, v: str, candidates: List[str]) -> Optional[str]:
         for base in candidates:
-            c, vv = _get_cv_of_base(base)
+            c, vv = self._split_cv(base)
             if c is None and vv == v:
                 return base
         return candidates[0] if candidates else None
@@ -418,10 +499,14 @@ class BatchCombineDialog(ctk.CTkToplevel):
         wav_path = self.oto_bank.folder_path / entry.wav_filename
         if wav_path.exists():
             waveform.load_with_oto(
-                wav_path, entry.offset, entry.consonant, entry.cutoff,
-                entry.overlap, entry.preutterance)
-            self._audio_player.play_segment(
-                wav_path, entry.offset, entry.cutoff)
+                wav_path,
+                entry.offset,
+                entry.consonant,
+                entry.cutoff,
+                entry.overlap,
+                entry.preutterance,
+            )
+            self._audio_player.play_segment(wav_path, entry.offset, entry.cutoff)
         else:
             waveform.clear()
 
@@ -430,12 +515,12 @@ class BatchCombineDialog(ctk.CTkToplevel):
     def _refresh_overview(self):
         # 收集并排序（未就绪在前）
         items = []
-        for hira, roma in self._missing:
-            c, v = split_japanese_cv(hira)
+        for item, roma in self._missing:
+            c, v = self._split_cv(item)
             c_cfg = self._consonant_configs.get(c)
             v_cfg = self._vowel_configs.get(v)
             ready = c_cfg is not None and v_cfg is not None
-            items.append((ready, hira, roma, c_cfg, v_cfg))
+            items.append((ready, item, roma, c_cfg, v_cfg))
         items.sort(key=lambda x: x[0])  # False -> True
 
         self._overview_text.configure(state="normal")
@@ -445,10 +530,11 @@ class BatchCombineDialog(ctk.CTkToplevel):
         try:
             self._overview_text.tag_config("ready", foreground="#4caf50")
             self._overview_text.tag_config("pending", foreground="#f44336")
+            self._overview_text.tag_config("skip", foreground="#9e9e9e")
         except tk.TclError:
             pass
 
-        for ready, hira, roma, c_cfg, v_cfg in items:
+        for ready, item, roma, c_cfg, v_cfg in items:
             if c_cfg:
                 c_str = f"{c_cfg['group_base']}[{c_cfg['entry_index']}]"
             else:
@@ -460,9 +546,13 @@ class BatchCombineDialog(ctk.CTkToplevel):
                 v_str = "待配置"
 
             status = "就绪" if ready else "待配置"
-            line = f"{hira:<6s} ({roma:<6s}) | 辅音: {c_str:<12s} | 元音: {v_str:<12s} | {status}\n"
+            line = f"{item:<6s} ({roma:<8s}) | 辅音: {c_str:<12s} | 元音: {v_str:<12s} | {status}\n"
             tag = "ready" if ready else "pending"
             self._overview_text.insert(tk.END, line, tag)
+
+        for item, reason in self._skipped_zh:
+            line = f"{item:<6s} ({item:<8s}) | 跳过：{reason}\n"
+            self._overview_text.insert(tk.END, line, "skip")
 
         self._overview_text.configure(state="disabled")
 
@@ -479,8 +569,8 @@ class BatchCombineDialog(ctk.CTkToplevel):
         fd, tmp_path = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
         total_ms = combine_audio_entries(
-            c_entry, v_entry, Path(tmp_path),
-            self.oto_bank.folder_path, parent=self)
+            c_entry, v_entry, Path(tmp_path), self.oto_bank.folder_path, parent=self
+        )
         if total_ms is None:
             try:
                 os.remove(tmp_path)
@@ -522,9 +612,8 @@ class BatchCombineDialog(ctk.CTkToplevel):
 
         if unconfigured:
             messagebox.showwarning(
-                "配置未完成",
-                "以下类型尚未配置来源样本:\n" + "\n".join(unconfigured),
-                parent=self)
+                "配置未完成", "以下类型尚未配置来源样本:\n" + "\n".join(unconfigured), parent=self
+            )
             return
 
         folder = self.oto_bank.folder_path
@@ -534,8 +623,14 @@ class BatchCombineDialog(ctk.CTkToplevel):
         generated: List[str] = []
         failed: List[str] = []
 
-        for hira, roma in self._missing:
-            c, v = split_japanese_cv(hira)
+        for item, _roma in self._missing:
+            c, v = self._split_cv(item)
+            if c is None or v is None:
+                failed.append(f"{item}: 零声母/未枚举，无法拼接")
+                continue
+            if c not in self._consonant_configs or v not in self._vowel_configs:
+                failed.append(f"{item}: 来源类型未配置")
+                continue
             c_cfg = self._consonant_configs[c]
             v_cfg = self._vowel_configs[v]
 
@@ -543,25 +638,24 @@ class BatchCombineDialog(ctk.CTkToplevel):
             v_entries = self.oto_bank.get_group_entries(v_cfg["group_base"])
 
             if not c_entries or not v_entries:
-                failed.append(f"{hira}: 来源分组为空")
+                failed.append(f"{item}: 来源分组为空")
                 continue
 
             c_idx = c_cfg.get("entry_index", 0)
             v_idx = v_cfg.get("entry_index", 0)
             if not (0 <= c_idx < len(c_entries)) or not (0 <= v_idx < len(v_entries)):
-                failed.append(f"{hira}: 样本索引越界")
+                failed.append(f"{item}: 样本索引越界")
                 continue
 
             c_entry = c_entries[c_idx]
             v_entry = v_entries[v_idx]
 
-            wav_name = self._get_unique_wav_name(hira, folder)
+            wav_name = self._get_unique_wav_name(item, folder)
             wav_path = folder / wav_name
 
-            total_ms = combine_audio_entries(
-                c_entry, v_entry, wav_path, folder, parent=self)
+            total_ms = combine_audio_entries(c_entry, v_entry, wav_path, folder, parent=self)
             if total_ms is None:
-                failed.append(f"{hira}: 音频拼接失败")
+                failed.append(f"{item}: 音频拼接失败")
                 continue
 
             consonant = c_entry.consonant
@@ -572,7 +666,7 @@ class BatchCombineDialog(ctk.CTkToplevel):
 
             entry = OtoEntry(
                 wav_filename=wav_name,
-                alias=hira,
+                alias=item,
                 offset=0.0,
                 consonant=round(consonant, 1),
                 cutoff=round(-total_ms, 1),
@@ -580,8 +674,8 @@ class BatchCombineDialog(ctk.CTkToplevel):
                 overlap=round(overlap, 1),
             )
 
-            self.oto_bank.add_entry_to_group(entry, hira)
-            generated.append(hira)
+            self.oto_bank.add_entry_to_group(entry, item)
+            generated.append(item)
 
         # 通知主窗口刷新
         if generated and hasattr(self.parent, "refresh_after_combine"):
@@ -611,8 +705,7 @@ class BatchCombineDialog(ctk.CTkToplevel):
         if entry and self.oto_bank.folder_path:
             wav = self.oto_bank.folder_path / entry.wav_filename
             if wav.exists():
-                self._audio_player.play_segment(
-                    wav, entry.offset, entry.cutoff)
+                self._audio_player.play_segment(wav, entry.offset, entry.cutoff)
 
     # ── 通用列表交互辅助 ───────────────────────────────────────
 

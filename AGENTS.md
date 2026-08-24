@@ -103,9 +103,12 @@ python main.py
 
 ### 新增拼字 (PhonemeCombineDialog)
 拼合两个音素条目（辅音源+元音源），生成新的组合音素：
-- 输入目标别名后自动拆分 CV（`split_japanese_cv`），左侧显示相同辅音分组，右侧显示相同元音分组
-- 支持平假名 ↔ 罗马音一键切换
-- "缺少"下拉菜单列出 `list.txt` 完整表中缺失的音素，选中后自动填入别名
+- 语言自动识别（假名 → 日语 / 拼音 → 中文，与批量拼字同源）；中文目标音节
+  → presamp 短 ID 分组（`jiong → j+ong`），左右栏候选/保底回退与批量拼字一致；
+  中文时「平假名↔罗马音」按钮禁用
+- 输入目标别名后自动拆分 CV（`split_japanese_cv` / 中文 presamp 拆分），左侧显示相同辅音分组，右侧显示相同元音分组
+- 支持平假名 ↔ 罗马音一键切换（仅日语）
+- "缺少"下拉菜单列出完整音素表中缺失的音素（日语 `list.txt` / 中文 410），选中后自动填入别名
 - 音频拼接函数 `combine_audio_entries()` 使用 `_enhanced_crossfade()`：
   - 辅音取 `[offset, offset+consonant)` 片段，元音取 `[offset+consonant, offset+|cutoff|)` 片段
   - RMS 振幅匹配（增益限制 0.5~2.0）、余弦 fade（S-curve）、端点 2ms fade-in/out
@@ -114,9 +117,14 @@ python main.py
 - 应用后通知主窗口 `refresh_after_combine()` 刷新并定位到新分组
 
 ### 批量拼字 (BatchCombineDialog)
-基于 `list.txt` 的 119 个完整音素对照 `ALL_REQUIRED_PHONEMES`，检测缺失音素并批量生成：
+基于完整音素表对照 `ALL_REQUIRED_PHONEMES`（日语）或标准 410 音节（中文），
+检测缺失音素并批量生成：
+- **语言自动识别**（按别名脚本：假名 → 日语；拼音 → 中文），中文复用
+  `jrh.languages.pinyin`（410 音节）+ `jrh.languages.presamp`（短 ID 分组，
+  与交付 presamp.ini/zh-cvv 同源）；中文零声母/未枚举音节（ang/eng/lve…）
+  无法 crossfade 拼接，列入总览「跳过」清单（需原版录音或手工替代）
 - 自动分组缺失音素的辅音/元音类型，左右两栏分别配置来源样本
-- 辅音候选分组支持降级回退（`_CONSONANT_FALLBACK`：如 `pw→p`, `ky→k`）
+- 辅音候选分组支持降级回退（`_CONSONANT_FALLBACK`：如 `pw→p`, `ky→k`；中文保底回退）
 - 保底回退：某辅音/元音类型在音源中找不到任何候选分组时，开放全部音素供选择（避免永久「待配置」堵死生成）
 - 底栏总览用红/绿标注每个缺失音素的配置状态
 - 一键生成：遍历所有缺失音素，用各自的辅音/元音样本组合生成 wav + oto 条目
@@ -174,6 +182,8 @@ hiragana_to_romaji(text) → str                  # 平假名 → 罗马音
   别名 = `{前单元元音} {下一单元起音辅音}`（**空格分隔**，如 `a k`、`a t1`）；
   区域 = 当前元音后半 + 下一辅音整段（止于下一元音起点）；公式在
   `Timing.vc_timing()`（`vc_offset_ratio`/`vc_overlap_ratio` 默认 0.5，ratio ∉ [0,1] 报错）。
+  **VC consonant = 区域 − 20% 元音尾**（元音区为 0 会被 hifisampler 等严格重采样器
+  拒绝；生态 bank 如 Nottthat_VCV 的 VC 条目 consonant 均只占窗口 53%~92%）。
   仅句内相邻配对（日语 x- 辅助拍如 `xtsu` 透明借位、按归一化坐标对去重）；
   下一单元辅音>0 才生成；无 ENDING、不跨句；ん 全辅音拍整体作 C 侧（`a n`）。
   **中文 VC 别名 = presamp 短 ID**（`an t`/`ir zh`/`i0 c`/`e0 j`/`vn q`/`i ny`/`a hw`），
@@ -218,12 +228,18 @@ python tests/golden/generate_golden.py     # 修改编译规则后重新生成 g
   「原版 oto.ini 逐字节 + VC/派生 CV 追加行 + 原版 wav 拷贝 + 句 wav」；
   中文母版另交付 presamp.ini（内置标准模板逐字节）。
   **体感无差别保证**（不用 VC 与原版完全一致，追加行是纯增量，别名含空格永不冲突）。
+- `jrh export-vc --substitute '{"lve":"yue","nve":"yue"}'`：对交付物别名全集仍缺失的
+  音节追加替代行（复用已有来源别名的 wav+参数，如零声母 lve/nve → 同韵母 yue；
+  UTAU 标准不收录 lve/nve 拼写）；纯增量、目标已存在或来源不存在时报错，默认关闭。
 - 中文 VC 别名 = presamp 短 ID，表 = `jrh/languages/presamp.py` 内置标准 presamp.ini
   （单一事实来源：交付文件、`vc_vowel`/`vc_consonant`、OpenUtau 内置 zh-cvv 三处同源）。
 - 整资产句「定向已有文件」：句 WAV 文件名 = 资产文件名，原样复制不重复转码
   （henki 单切片句与拼字句命中；多切片句仍写 sentence_NNN.wav）。
-- 真实交付物样例：`E:\Singer\ShiQi17.jrh`（日语母版）与
-  `E:\Singer\ShiQi17_CVVC`（日语补充音源）。
+- 真实交付物样例：`E:\Singer\ShiQi17.jrh`（日语母版）、
+  `E:\Singer\ShiQi17_CVVC`（日语补充音源）、`E:\Singer\DJUTAU.jrh`（中文母版、
+  459 句/4005 单元/141 拼字音节）与 `E:\Singer\DJUTAU_CVVC`（中文补充音源，
+  410 音节全量覆盖：原版 2042 + VC 3324（con<|cut|，兼容 hifisampler）+
+  派生 CV 119 + 替换 lve/nve→yue）。
 
 ### 测试布局
 `tests/unit|integration|acceptance|golden|negative|property|regression`；

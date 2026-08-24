@@ -182,7 +182,7 @@
       "alias": "a t",
       "kind": "vc",
       "params": {
-        "consonant": 634.921,
+        "consonant": 507.937,
         "cutoff": -634.921,
         "offset": 226.757,
         "overlap": 113.379,
@@ -317,7 +317,7 @@
       "alias": "o n",
       "kind": "vc",
       "params": {
-        "consonant": 521.542,
+        "consonant": 417.234,
         "cutoff": -521.542,
         "offset": 340.136,
         "overlap": 102.041,
@@ -452,7 +452,7 @@
       "alias": "i ch",
       "kind": "vc",
       "params": {
-        "consonant": 306.122,
+        "consonant": 244.898,
         "cutoff": -306.122,
         "offset": 1190.476,
         "overlap": 85.034,
@@ -527,7 +527,7 @@
       "alias": "i h",
       "kind": "vc",
       "params": {
-        "consonant": 226.757,
+        "consonant": 181.406,
         "cutoff": -226.757,
         "offset": 1587.302,
         "overlap": 45.351,
@@ -662,7 +662,7 @@
       "alias": "a k",
       "kind": "vc",
       "params": {
-        "consonant": 340.136,
+        "consonant": 272.109,
         "cutoff": -340.136,
         "offset": 340.136,
         "overlap": 102.041,
@@ -797,7 +797,7 @@
       "alias": "a t1",
       "kind": "vc",
       "params": {
-        "consonant": 385.488,
+        "consonant": 308.39,
         "cutoff": -385.488,
         "offset": 340.136,
         "overlap": 102.041,

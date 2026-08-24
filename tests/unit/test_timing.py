@@ -95,7 +95,7 @@ class TestVcFormula:
         vc = u.vc_timing(v, 0.5, 0.5)
         assert vc.offset == 100.0  # 元音中点（200 - 200*0.5）
         assert vc.preutterance == 100.0  # 边界位置 = 元音尾
-        assert vc.consonant == 170.0  # 270 - 100（= 区域全长）
+        assert vc.consonant == 136.0  # 区域全长 170 − 20% 元音尾（34）
         assert vc.cutoff == -170.0
         assert vc.overlap == 50.0  # 100 * 0.5
         assert vc.constraint_errors() == []
@@ -106,7 +106,7 @@ class TestVcFormula:
         vc = u.vc_timing(v, 0.5, 0.5)
         assert vc.preutterance == 130.0  # 260 * 0.5
         assert vc.offset == 400.0 - 130.0  # window_end=400
-        assert vc.consonant == 460.0 - 270.0  # = 区域全长 190
+        assert vc.consonant == 152.0  # 区域全长 190 − 20% 元音尾（38）
         assert vc.cutoff == -190.0
         assert vc.overlap == 65.0
         assert vc.constraint_errors() == []
@@ -146,7 +146,7 @@ class TestVcFormula:
         vc = u.vc_timing(v, 0.0, 0.0)
         assert vc is not None
         assert vc.offset == 200.0
-        assert vc.consonant == 70.0
+        assert vc.consonant == 56.0  # 区域全长 70 − 20% 元音尾（14）
         assert vc.cutoff == -70.0
         assert vc.preutterance == 0.0
         assert vc.overlap == 0.0
@@ -173,14 +173,11 @@ class TestVcFormula:
         assert vc.preutterance == 0.25
         assert vc.constraint_errors() == []
 
-    def test_vc_fractional_next_consonant_generates(self):
-        # 下一辅音区 0.5 采样：仍生成
+    def test_vc_fractional_next_consonant_rejected(self):
+        # 下一辅音区 0.5 采样（≈0）：preutterance 越出保留元音尾后的辅音区 → 不生成
         u = Timing(0.0, 0.0, -200.0, 0.0, 0.0)
         v = Timing(210.0, 0.5, -180.0, 0.0, 0.0)
-        vc = u.vc_timing(v, 0.5, 0.5)
-        assert vc is not None
-        assert vc.consonant == 110.5  # 270.5 - 100 → 下一元音起点 210.5
-        assert vc.constraint_errors() == []
+        assert u.vc_timing(v, 0.5, 0.5) is None
 
     def test_vc_window_zero_with_zero_pre_none(self):
         # window == 0 且 pre == 0：退化窗口，不生成
@@ -188,29 +185,18 @@ class TestVcFormula:
         v = Timing(150.0, 50.0, -100.0, 0.0, 0.0)  # 下一元音起点恰为 200
         assert u.vc_timing(v, 0.0, 0.0) is None
 
-    def test_vc_window_unit_fraction_generates(self):
-        # 窗口恰为 1.0 采样：仍生成
+    def test_vc_window_unit_fraction_rejected(self):
+        # 窗口恰为 1.0 采样：不足以保留 20% 元音尾（consonant ≤ 0）→ 不生成
         u = Timing(0.0, 199.0, -200.0, 0.0, 0.0)  # 元音区 1.0
         v = Timing(190.0, 10.5, -100.0, 0.0, 0.0)  # 下一元音起点 200.5
-        vc = u.vc_timing(v, 0.5, 0.5)
-        assert vc is not None
-        assert vc.preutterance == 0.5  # 1.0 * 0.5
-        assert vc.consonant == 1.0  # 窗口 = 200.5 - 199.5
-        assert vc.cutoff == -1.0
-        assert vc.constraint_errors() == []
+        assert u.vc_timing(v, 0.5, 0.5) is None
 
-    def test_vc_pre_equal_window_generates(self):
-        # pre == window（下一元音起点恰为当前窗口末端）：合法边界，仍生成
+    def test_vc_pre_equal_window_rejected(self):
+        # pre == window（下一元音起点恰为当前窗口末端）：越出保留元音尾后的
+        # 辅音区（preutterance > consonant）→ 标注重叠/退化，不生成
         u = Timing(0.0, 0.0, -200.0, 0.0, 0.0)  # pre = 100
         v = Timing(150.0, 50.0, -100.0, 0.0, 0.0)  # 下一元音起点恰为 200
-        vc = u.vc_timing(v, 0.5, 0.5)
-        assert vc is not None
-        assert vc.offset == 100.0
-        assert vc.consonant == 100.0  # window == pre == 100
-        assert vc.cutoff == -100.0
-        assert vc.preutterance == 100.0
-        assert vc.overlap == 50.0
-        assert vc.constraint_errors() == []
+        assert u.vc_timing(v, 0.5, 0.5) is None
 
     def test_vc_constraints_on_realistic_pair(self):
         # 中文 demo 的 ni → hao 相邻对（44100 Hz）

@@ -33,14 +33,10 @@ class RenameGroupDialog(ctk.CTkToplevel):
         frame = ctk.CTkFrame(self, fg_color="transparent")
         frame.pack(fill="both", expand=True, padx=16, pady=16)
 
-        ctk.CTkLabel(frame, text="新组名:", font=ctk.CTkFont(size=12)).pack(
-            anchor="w"
-        )
+        ctk.CTkLabel(frame, text="新组名:", font=ctk.CTkFont(size=12)).pack(anchor="w")
 
         self._var = tk.StringVar(value=self.base)
-        entry = ctk.CTkEntry(
-            frame, textvariable=self._var, font=ctk.CTkFont(size=12)
-        )
+        entry = ctk.CTkEntry(frame, textvariable=self._var, font=ctk.CTkFont(size=12))
         entry.pack(fill="x", pady=(4, 12))
         entry.select_range(0, tk.END)
         entry.icursor(tk.END)
@@ -50,9 +46,9 @@ class RenameGroupDialog(ctk.CTkToplevel):
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
         btn_frame.pack(fill="x")
 
-        ctk.CTkButton(
-            btn_frame, text="确认", width=80, command=self._on_confirm
-        ).pack(side="right", padx=(4, 0))
+        ctk.CTkButton(btn_frame, text="确认", width=80, command=self._on_confirm).pack(
+            side="right", padx=(4, 0)
+        )
         ctk.CTkButton(
             btn_frame,
             text="取消",
@@ -174,9 +170,9 @@ class MergeGroupDialog(ctk.CTkToplevel):
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
         btn_frame.pack(fill="x")
 
-        ctk.CTkButton(
-            btn_frame, text="确认", width=80, command=self._on_confirm
-        ).pack(side="right", padx=(4, 0))
+        ctk.CTkButton(btn_frame, text="确认", width=80, command=self._on_confirm).pack(
+            side="right", padx=(4, 0)
+        )
         ctk.CTkButton(
             btn_frame,
             text="取消",

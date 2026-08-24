@@ -109,6 +109,11 @@ class Sentence:
 
 # ── Timing（唯一一套原音设定，VCV/CVVC 式五参数，单位：采样点）──
 
+# VC 条目的元音尾占区域全长的最小比例：保证 consonant < |cutoff|
+# （元音区为 0 会被 hifisampler 等严格重采样器拒绝；生态 bank 惯例如
+# Nottthat_VCV 的 53%~92%，取 0.2 保守且对短窗也安全）
+VC_VOWEL_TAIL_RATIO = 0.2
+
 
 @dataclass
 class Timing:
@@ -187,10 +192,12 @@ class Timing:
 
         - 区域 = [当前窗口末端 - 元音时长×offset_ratio, 下一单元 offset+consonant)
           （元音尾 + 下一辅音整段，不延伸到下一单元元音内部——修正参考实现的宽窗口）
-        - consonant = 下一元音起点相对本 offset 的位置（= 区域全长）
-        - preutterance = 元音/辅音边界相对 offset 的位置
+        - consonant = 区域全长 − 元音尾（保留 ≥ 区域 20% 的元音区；
+          生态 bank 惯例如 Nottthat_VCV 的 53%~92%，元音区为 0 会被
+          hifisampler 等严格重采样器拒绝）
+        - preutterance = 元音/辅音边界相对 offset 的位置（恒 ≤ consonant）
         - 下一单元辅音不存在（consonant<=0）、元音区为空、
-          或区域非正/不足以容纳 preutterance（标注重叠）时返回 None（不生成）。
+          或区域非正/不足（标注重叠）时返回 None（不生成）。
         """
         if not (0.0 <= offset_ratio <= 1.0 and 0.0 <= overlap_ratio <= 1.0):
             raise InvalidInputError(
@@ -207,9 +214,13 @@ class Timing:
         window = next_timing.offset + next_timing.consonant - offset
         if window <= 0 or pre > window:
             return None  # 区域非正 / 不足（单元窗口重叠等异常标注）
+        vowel_tail = max(window * VC_VOWEL_TAIL_RATIO, 1.0)  # 至少 1 采样
+        consonant = max(window - vowel_tail, 0.0)
+        if consonant <= 0 or pre > consonant:
+            return None  # 区域过小 / 标注重叠（preutterance 越出辅音区）
         return Timing(
             offset=offset,
-            consonant=window,
+            consonant=consonant,
             cutoff=-window,
             preutterance=pre,
             overlap=pre * overlap_ratio,

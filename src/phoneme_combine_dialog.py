@@ -9,78 +9,322 @@ import customtkinter as ctk
 import numpy as np
 import soundfile as sf
 
+from jrh.languages.pinyin import all_units as _zh_all_units
+from jrh.languages.presamp import consonant_id_of as _zh_consonant_id
+from jrh.languages.presamp import vowel_id_of as _zh_vowel_id
+
 from .audio_player import AudioPlayer
 from .draggable_list import _get_cjk_font, DraggableListbox
 from .oto_parser import OtoBank, OtoEntry, get_base_phoneme, hiragana_to_romaji
 from .waveform_display import WaveformDisplay
 
+
+# ── 中文音源支持（复用 JRH 语言包：410 音节 + presamp 短 ID 分组）──────────
+
+
+def detect_bank_language(bases: List[str]) -> str:
+    """按别名脚本占比自动识别音源语言。
+
+    中文音源别名是无声调拼音（ASCII），日语音源含假名；混合标注的音源
+    （如三色あやか_CVVCHN 带假名）按占比较量判定：标准拼音音节过半 → zh，
+    假名过半 → ja。
+    """
+    n = len(bases)
+    if n == 0:
+        return "zh"
+    kana = sum(1 for b in bases if any("\u3040" <= ch <= "\u30ff" for ch in b))
+    zh_units = set(_zh_all_units())
+    pinyin = sum(1 for b in bases if b in zh_units)
+    if pinyin * 2 >= n:
+        return "zh"
+    if kana * 2 >= n:
+        return "ja"
+    return "zh" if pinyin >= kana else "ja"
+
+
+def split_pinyin_cv(syllable: str) -> Tuple[Optional[str], Optional[str]]:
+    """中文音节 → (presamp 声母短 ID, presamp 韵母短 ID)。
+
+    零声母（ang/ao/ou…）声母侧为 None；presamp 未枚举（lve/nve…）两侧为 None。
+    """
+    return _zh_consonant_id(syllable), _zh_vowel_id(syllable)
+
+
+def zh_required_units() -> List[str]:
+    """中文完整音节表（标准 410 个无声调拼音，与 jrh.zh-pinyin 同源）。"""
+    return sorted(_zh_all_units())
+
+
+def zh_partition_missing(
+    syllables: List[str],
+) -> Tuple[List[Tuple[str, str, str]], List[Tuple[str, str]]]:
+    """中文缺失音节 → (可拼接 [(音节, 声母ID, 韵母ID)], 跳过 [(音节, 原因)])。
+
+    零声母（ang/ou…）或 presamp 未枚举（cei/eng/lve…）没有可配置的
+    声母/韵母组（两侧无选项，永远拼不出来），列入跳过清单
+    （与 master 侧 `jrh combine` 的 skipped 语义一致）。
+    """
+    combinable: List[Tuple[str, str, str]] = []
+    skipped: List[Tuple[str, str]] = []
+    for s in syllables:
+        c, v = split_pinyin_cv(s)
+        if c is None or v is None:
+            reason = "零声母（需原版录音）" if v is not None else "韵母未枚举（presamp 无此组）"
+            skipped.append((s, reason))
+        else:
+            combinable.append((s, c, v))
+    return combinable, skipped
+
+
+def _zh_format_group_label(base: str, count: int) -> str:
+    return f"  {base:<8s} ({count})"
+
+
 # ── 日语罗马音辅音（按长度降序，保证最长优先匹配） ───────────────
 _JAPANESE_CONSONANTS_DESC = [
     # 2字母辅音
-    "ch", "sh", "ts",
-    "ny", "ky", "gy", "py", "by", "my", "ry", "hy",
-    "kw", "sw", "tw", "dw", "nw", "mw", "rw", "gw", "zw", "bw", "pw",
+    "ch",
+    "sh",
+    "ts",
+    "ny",
+    "ky",
+    "gy",
+    "py",
+    "by",
+    "my",
+    "ry",
+    "hy",
+    "kw",
+    "sw",
+    "tw",
+    "dw",
+    "nw",
+    "mw",
+    "rw",
+    "gw",
+    "zw",
+    "bw",
+    "pw",
     "wh",
     # 单字母辅音
-    "k", "g", "s", "z", "t", "d", "n", "h", "b", "p", "m", "r", "w", "y", "f", "j",
+    "k",
+    "g",
+    "s",
+    "z",
+    "t",
+    "d",
+    "n",
+    "h",
+    "b",
+    "p",
+    "m",
+    "r",
+    "w",
+    "y",
+    "f",
+    "j",
 ]
 
 # 扩展音素辅音降级映射：找不到组合辅音分组时回退到单辅音
 _CONSONANT_FALLBACK = {
-    "pw": "p", "kw": "k", "sw": "s", "tw": "t", "dw": "d",
-    "nw": "n", "mw": "m", "rw": "r", "gw": "g", "zw": "z", "bw": "b",
+    "pw": "p",
+    "kw": "k",
+    "sw": "s",
+    "tw": "t",
+    "dw": "d",
+    "nw": "n",
+    "mw": "m",
+    "rw": "r",
+    "gw": "g",
+    "zw": "z",
+    "bw": "b",
     "wh": "w",
-    "ny": "n", "ky": "k", "gy": "g", "py": "p", "by": "b",
-    "my": "m", "ry": "r", "hy": "h",
-    "sh": "s", "ch": "t", "ts": "t",
+    "ny": "n",
+    "ky": "k",
+    "gy": "g",
+    "py": "p",
+    "by": "b",
+    "my": "m",
+    "ry": "r",
+    "hy": "h",
+    "sh": "s",
+    "ch": "t",
+    "ts": "t",
 }
 
 # ── 罗马音 → 平假名（常见 CV 映射） ────────────────────────────
 _ROMAJI_TO_HIRAGANA = {
-    "a": "あ", "i": "い", "u": "う", "e": "え", "o": "お",
-    "ka": "か", "ki": "き", "ku": "く", "ke": "け", "ko": "こ",
-    "sa": "さ", "shi": "し", "su": "す", "se": "せ", "so": "そ",
-    "ta": "た", "chi": "ち", "tsu": "つ", "te": "て", "to": "と",
-    "na": "な", "ni": "に", "nu": "ぬ", "ne": "ね", "no": "の",
-    "ha": "は", "hi": "ひ", "fu": "ふ", "he": "へ", "ho": "ほ",
-    "ma": "ま", "mi": "み", "mu": "む", "me": "め", "mo": "も",
-    "ya": "や", "yu": "ゆ", "yo": "よ",
-    "ra": "ら", "ri": "り", "ru": "る", "re": "れ", "ro": "ろ",
-    "wa": "わ", "wo": "を", "n": "ん",
-    "ga": "が", "gi": "ぎ", "gu": "ぐ", "ge": "げ", "go": "ご",
-    "za": "ざ", "ji": "じ", "zu": "ず", "ze": "ぜ", "zo": "ぞ",
-    "da": "だ", "di": "ぢ", "du": "づ", "de": "で", "do": "ど",
-    "ba": "ば", "bi": "び", "bu": "ぶ", "be": "べ", "bo": "ぼ",
-    "pa": "ぱ", "pi": "ぴ", "pu": "ぷ", "pe": "ぺ", "po": "ぽ",
-    "kya": "きゃ", "kyu": "きゅ", "kyo": "きょ",
-    "sha": "しゃ", "shu": "しゅ", "sho": "しょ",
-    "cha": "ちゃ", "chu": "ちゅ", "cho": "ちょ",
-    "nya": "にゃ", "nyu": "にゅ", "nyo": "にょ",
-    "hya": "ひゃ", "hyu": "ひゅ", "hyo": "ひょ",
-    "mya": "みゃ", "myu": "みゅ", "myo": "みょ",
-    "rya": "りゃ", "ryu": "りゅ", "ryo": "りょ",
-    "gya": "ぎゃ", "gyu": "ぎゅ", "gyo": "ぎょ",
-    "ja": "じゃ", "ju": "じゅ", "jo": "じょ",
-    "bya": "びゃ", "byu": "びゅ", "byo": "びょ",
-    "pya": "ぴゃ", "pyu": "ぴゅ", "pyo": "ぴょ",
+    "a": "あ",
+    "i": "い",
+    "u": "う",
+    "e": "え",
+    "o": "お",
+    "ka": "か",
+    "ki": "き",
+    "ku": "く",
+    "ke": "け",
+    "ko": "こ",
+    "sa": "さ",
+    "shi": "し",
+    "su": "す",
+    "se": "せ",
+    "so": "そ",
+    "ta": "た",
+    "chi": "ち",
+    "tsu": "つ",
+    "te": "て",
+    "to": "と",
+    "na": "な",
+    "ni": "に",
+    "nu": "ぬ",
+    "ne": "ね",
+    "no": "の",
+    "ha": "は",
+    "hi": "ひ",
+    "fu": "ふ",
+    "he": "へ",
+    "ho": "ほ",
+    "ma": "ま",
+    "mi": "み",
+    "mu": "む",
+    "me": "め",
+    "mo": "も",
+    "ya": "や",
+    "yu": "ゆ",
+    "yo": "よ",
+    "ra": "ら",
+    "ri": "り",
+    "ru": "る",
+    "re": "れ",
+    "ro": "ろ",
+    "wa": "わ",
+    "wo": "を",
+    "n": "ん",
+    "ga": "が",
+    "gi": "ぎ",
+    "gu": "ぐ",
+    "ge": "げ",
+    "go": "ご",
+    "za": "ざ",
+    "ji": "じ",
+    "zu": "ず",
+    "ze": "ぜ",
+    "zo": "ぞ",
+    "da": "だ",
+    "di": "ぢ",
+    "du": "づ",
+    "de": "で",
+    "do": "ど",
+    "ba": "ば",
+    "bi": "び",
+    "bu": "ぶ",
+    "be": "べ",
+    "bo": "ぼ",
+    "pa": "ぱ",
+    "pi": "ぴ",
+    "pu": "ぷ",
+    "pe": "ぺ",
+    "po": "ぽ",
+    "kya": "きゃ",
+    "kyu": "きゅ",
+    "kyo": "きょ",
+    "sha": "しゃ",
+    "shu": "しゅ",
+    "sho": "しょ",
+    "cha": "ちゃ",
+    "chu": "ちゅ",
+    "cho": "ちょ",
+    "nya": "にゃ",
+    "nyu": "にゅ",
+    "nyo": "にょ",
+    "hya": "ひゃ",
+    "hyu": "ひゅ",
+    "hyo": "ひょ",
+    "mya": "みゃ",
+    "myu": "みゅ",
+    "myo": "みょ",
+    "rya": "りゃ",
+    "ryu": "りゅ",
+    "ryo": "りょ",
+    "gya": "ぎゃ",
+    "gyu": "ぎゅ",
+    "gyo": "ぎょ",
+    "ja": "じゃ",
+    "ju": "じゅ",
+    "jo": "じょ",
+    "bya": "びゃ",
+    "byu": "びゅ",
+    "byo": "びょ",
+    "pya": "ぴゃ",
+    "pyu": "ぴゅ",
+    "pyo": "ぴょ",
     # 外来语 / 扩展音素
-    "ye": "いぇ", "kye": "きぇ", "she": "しぇ", "che": "ちぇ",
-    "nye": "にぇ", "hye": "ひぇ", "mye": "みぇ", "rye": "りぇ",
-    "gye": "ぎぇ", "je": "じぇ", "bye": "びぇ", "pye": "ぴぇ",
-    "wha": "うぁ", "wi": "うぃ", "we": "うぇ", "who": "うぉ",
-    "kwa": "くぁ", "kwi": "くぃ", "kwe": "くぇ", "kwo": "くぉ",
-    "swa": "すぁ", "swi": "すぃ", "swe": "すぇ", "swo": "すぉ",
-    "tsa": "つぁ", "tsi": "つぃ", "tse": "つぇ", "tso": "つぉ",
-    "nwa": "ぬぁ", "nwi": "ぬぃ", "nwe": "ぬぇ", "nwo": "ぬぉ",
-    "fa": "ふぁ", "fi": "ふぃ", "fe": "ふぇ", "fo": "ふぉ",
-    "mwa": "むぁ", "mwi": "むぃ", "mwe": "むぇ", "mwo": "むぉ",
-    "rwa": "るぁ", "rwi": "るぃ", "rwe": "るぇ", "rwo": "るぉ",
-    "gwa": "ぐぁ", "gwi": "ぐぃ", "gwe": "ぐぇ", "gwo": "ぐぉ",
-    "zwa": "ずぁ", "zwi": "ずぃ", "zwe": "ずぇ", "zwo": "ずぉ",
-    "bwa": "ぶぁ", "bwi": "ぶぃ", "bwe": "ぶぇ", "bwo": "ぶぉ",
-    "pwa": "ぷぁ", "pwi": "ぷぃ", "pwe": "ぷぇ", "pwo": "ぷぉ",
-    "ti": "てぃ", "di": "でぃ", "tu": "てゅ", "du": "でゅ",
-    "twu": "とぅ", "dwu": "どぅ",
+    "ye": "いぇ",
+    "kye": "きぇ",
+    "she": "しぇ",
+    "che": "ちぇ",
+    "nye": "にぇ",
+    "hye": "ひぇ",
+    "mye": "みぇ",
+    "rye": "りぇ",
+    "gye": "ぎぇ",
+    "je": "じぇ",
+    "bye": "びぇ",
+    "pye": "ぴぇ",
+    "wha": "うぁ",
+    "wi": "うぃ",
+    "we": "うぇ",
+    "who": "うぉ",
+    "kwa": "くぁ",
+    "kwi": "くぃ",
+    "kwe": "くぇ",
+    "kwo": "くぉ",
+    "swa": "すぁ",
+    "swi": "すぃ",
+    "swe": "すぇ",
+    "swo": "すぉ",
+    "tsa": "つぁ",
+    "tsi": "つぃ",
+    "tse": "つぇ",
+    "tso": "つぉ",
+    "nwa": "ぬぁ",
+    "nwi": "ぬぃ",
+    "nwe": "ぬぇ",
+    "nwo": "ぬぉ",
+    "fa": "ふぁ",
+    "fi": "ふぃ",
+    "fe": "ふぇ",
+    "fo": "ふぉ",
+    "mwa": "むぁ",
+    "mwi": "むぃ",
+    "mwe": "むぇ",
+    "mwo": "むぉ",
+    "rwa": "るぁ",
+    "rwi": "るぃ",
+    "rwe": "るぇ",
+    "rwo": "るぉ",
+    "gwa": "ぐぁ",
+    "gwi": "ぐぃ",
+    "gwe": "ぐぇ",
+    "gwo": "ぐぉ",
+    "zwa": "ずぁ",
+    "zwi": "ずぃ",
+    "zwe": "ずぇ",
+    "zwo": "ずぉ",
+    "bwa": "ぶぁ",
+    "bwi": "ぶぃ",
+    "bwe": "ぶぇ",
+    "bwo": "ぶぉ",
+    "pwa": "ぷぁ",
+    "pwi": "ぷぃ",
+    "pwe": "ぷぇ",
+    "pwo": "ぷぉ",
+    "ti": "てぃ",
+    "di": "でぃ",
+    "tu": "てゅ",
+    "du": "でゅ",
+    "twu": "とぅ",
+    "dwu": "どぅ",
 }
 
 
@@ -115,67 +359,187 @@ def split_japanese_cv(text: str) -> Tuple[Optional[str], Optional[str]]:
     return None, romaji if romaji else None
 
 
-def _get_cv_of_base(base: str) -> Tuple[Optional[str], Optional[str]]:
-    """获取分组的辅音/元音拆分。"""
-    return split_japanese_cv(base)
-
-
 # ── list.txt 完整音素表（平假名 + 罗马音）──────────────────────
 ALL_REQUIRED_PHONEMES = [
     # 清音
-    ("あ", "a"), ("い", "i"), ("う", "u"), ("え", "e"), ("お", "o"),
-    ("か", "ka"), ("き", "ki"), ("く", "ku"), ("け", "ke"), ("こ", "ko"),
-    ("さ", "sa"), ("し", "shi"), ("す", "su"), ("せ", "se"), ("そ", "so"),
-    ("た", "ta"), ("ち", "chi"), ("つ", "tsu"), ("て", "te"), ("と", "to"),
-    ("な", "na"), ("に", "ni"), ("ぬ", "nu"), ("ね", "ne"), ("の", "no"),
-    ("は", "ha"), ("ひ", "hi"), ("ふ", "fu"), ("へ", "he"), ("ほ", "ho"),
-    ("ま", "ma"), ("み", "mi"), ("む", "mu"), ("め", "me"), ("も", "mo"),
-    ("や", "ya"), ("ゆ", "yu"), ("よ", "yo"),
-    ("ら", "ra"), ("り", "ri"), ("る", "ru"), ("れ", "re"), ("ろ", "ro"),
-    ("わ", "wa"), ("を", "wo"), ("ん", "n"),
+    ("あ", "a"),
+    ("い", "i"),
+    ("う", "u"),
+    ("え", "e"),
+    ("お", "o"),
+    ("か", "ka"),
+    ("き", "ki"),
+    ("く", "ku"),
+    ("け", "ke"),
+    ("こ", "ko"),
+    ("さ", "sa"),
+    ("し", "shi"),
+    ("す", "su"),
+    ("せ", "se"),
+    ("そ", "so"),
+    ("た", "ta"),
+    ("ち", "chi"),
+    ("つ", "tsu"),
+    ("て", "te"),
+    ("と", "to"),
+    ("な", "na"),
+    ("に", "ni"),
+    ("ぬ", "nu"),
+    ("ね", "ne"),
+    ("の", "no"),
+    ("は", "ha"),
+    ("ひ", "hi"),
+    ("ふ", "fu"),
+    ("へ", "he"),
+    ("ほ", "ho"),
+    ("ま", "ma"),
+    ("み", "mi"),
+    ("む", "mu"),
+    ("め", "me"),
+    ("も", "mo"),
+    ("や", "ya"),
+    ("ゆ", "yu"),
+    ("よ", "yo"),
+    ("ら", "ra"),
+    ("り", "ri"),
+    ("る", "ru"),
+    ("れ", "re"),
+    ("ろ", "ro"),
+    ("わ", "wa"),
+    ("を", "wo"),
+    ("ん", "n"),
     # 浊音
-    ("が", "ga"), ("ぎ", "gi"), ("ぐ", "gu"), ("げ", "ge"), ("ご", "go"),
-    ("ざ", "za"), ("じ", "ji"), ("ず", "zu"), ("ぜ", "ze"), ("ぞ", "zo"),
-    ("だ", "da"), ("で", "de"), ("ど", "do"),
-    ("ば", "ba"), ("び", "bi"), ("ぶ", "bu"), ("べ", "be"), ("ぼ", "bo"),
+    ("が", "ga"),
+    ("ぎ", "gi"),
+    ("ぐ", "gu"),
+    ("げ", "ge"),
+    ("ご", "go"),
+    ("ざ", "za"),
+    ("じ", "ji"),
+    ("ず", "zu"),
+    ("ぜ", "ze"),
+    ("ぞ", "zo"),
+    ("だ", "da"),
+    ("で", "de"),
+    ("ど", "do"),
+    ("ば", "ba"),
+    ("び", "bi"),
+    ("ぶ", "bu"),
+    ("べ", "be"),
+    ("ぼ", "bo"),
     # 半浊音
-    ("ぱ", "pa"), ("ぴ", "pi"), ("ぷ", "pu"), ("ぺ", "pe"), ("ぽ", "po"),
+    ("ぱ", "pa"),
+    ("ぴ", "pi"),
+    ("ぷ", "pu"),
+    ("ぺ", "pe"),
+    ("ぽ", "po"),
     # 拗音
-    ("きゃ", "kya"), ("きゅ", "kyu"), ("きょ", "kyo"),
-    ("しゃ", "sha"), ("しゅ", "shu"), ("しょ", "sho"),
-    ("ちゃ", "cha"), ("ちゅ", "chu"), ("ちょ", "cho"),
-    ("にゃ", "nya"), ("にゅ", "nyu"), ("にょ", "nyo"),
-    ("ひゃ", "hya"), ("ひゅ", "hyu"), ("ひょ", "hyo"),
-    ("みゃ", "mya"), ("みゅ", "myu"), ("みょ", "myo"),
-    ("りゃ", "rya"), ("りゅ", "ryu"), ("りょ", "ryo"),
-    ("ぎゃ", "gya"), ("ぎゅ", "gyu"), ("ぎょ", "gyo"),
-    ("じゃ", "ja"), ("じゅ", "ju"), ("じょ", "jo"),
-    ("びゃ", "bya"), ("びゅ", "byu"), ("びょ", "byo"),
-    ("ぴゃ", "pya"), ("ぴゅ", "pyu"), ("ぴょ", "pyo"),
+    ("きゃ", "kya"),
+    ("きゅ", "kyu"),
+    ("きょ", "kyo"),
+    ("しゃ", "sha"),
+    ("しゅ", "shu"),
+    ("しょ", "sho"),
+    ("ちゃ", "cha"),
+    ("ちゅ", "chu"),
+    ("ちょ", "cho"),
+    ("にゃ", "nya"),
+    ("にゅ", "nyu"),
+    ("にょ", "nyo"),
+    ("ひゃ", "hya"),
+    ("ひゅ", "hyu"),
+    ("ひょ", "hyo"),
+    ("みゃ", "mya"),
+    ("みゅ", "myu"),
+    ("みょ", "myo"),
+    ("りゃ", "rya"),
+    ("りゅ", "ryu"),
+    ("りょ", "ryo"),
+    ("ぎゃ", "gya"),
+    ("ぎゅ", "gyu"),
+    ("ぎょ", "gyo"),
+    ("じゃ", "ja"),
+    ("じゅ", "ju"),
+    ("じょ", "jo"),
+    ("びゃ", "bya"),
+    ("びゅ", "byu"),
+    ("びょ", "byo"),
+    ("ぴゃ", "pya"),
+    ("ぴゅ", "pyu"),
+    ("ぴょ", "pyo"),
     # 扩展音素
-    ("いぇ", "ye"), ("きぇ", "kye"), ("しぇ", "she"), ("ちぇ", "che"),
-    ("にぇ", "nye"), ("ひぇ", "hye"), ("みぇ", "mye"), ("りぇ", "rye"),
-    ("ぎぇ", "gye"), ("じぇ", "je"), ("びぇ", "bye"), ("ぴぇ", "pye"),
-    ("うぁ", "wha"), ("うぃ", "wi"), ("うぇ", "we"), ("うぉ", "who"),
-    ("くぁ", "kwa"), ("くぃ", "kwi"), ("くぇ", "kwe"), ("くぉ", "kwo"),
-    ("すぁ", "swa"), ("すぃ", "swi"), ("すぇ", "swe"), ("すぉ", "swo"),
-    ("つぁ", "tsa"), ("つぃ", "tsi"), ("つぇ", "tse"), ("つぉ", "tso"),
-    ("ぬぁ", "nwa"), ("ぬぃ", "nwi"), ("ぬぇ", "nwe"), ("ぬぉ", "nwo"),
-    ("ふぁ", "fa"), ("ふぃ", "fi"), ("ふぇ", "fe"), ("ふぉ", "fo"),
-    ("むぁ", "mwa"), ("むぃ", "mwi"), ("むぇ", "mwe"), ("むぉ", "mwo"),
-    ("るぁ", "rwa"), ("るぃ", "rwi"), ("るぇ", "rwe"), ("るぉ", "rwo"),
-    ("ぐぁ", "gwa"), ("ぐぃ", "gwi"), ("ぐぇ", "gwe"), ("ぐぉ", "gwo"),
-    ("ずぁ", "zwa"), ("ずぃ", "zwi"), ("ずぇ", "zwe"), ("ずぉ", "zwo"),
-    ("ぶぁ", "bwa"), ("ぶぃ", "bwi"), ("ぶぇ", "bwe"), ("ぶぉ", "bwo"),
-    ("ぷぁ", "pwa"), ("ぷぃ", "pwi"), ("ぷぇ", "pwe"), ("ぷぉ", "pwo"),
-    ("てぃ", "ti"), ("でぃ", "di"), ("てゅ", "tu"), ("でゅ", "du"),
-    ("とぅ", "twu"), ("どぅ", "dwu"),
+    ("いぇ", "ye"),
+    ("きぇ", "kye"),
+    ("しぇ", "she"),
+    ("ちぇ", "che"),
+    ("にぇ", "nye"),
+    ("ひぇ", "hye"),
+    ("みぇ", "mye"),
+    ("りぇ", "rye"),
+    ("ぎぇ", "gye"),
+    ("じぇ", "je"),
+    ("びぇ", "bye"),
+    ("ぴぇ", "pye"),
+    ("うぁ", "wha"),
+    ("うぃ", "wi"),
+    ("うぇ", "we"),
+    ("うぉ", "who"),
+    ("くぁ", "kwa"),
+    ("くぃ", "kwi"),
+    ("くぇ", "kwe"),
+    ("くぉ", "kwo"),
+    ("すぁ", "swa"),
+    ("すぃ", "swi"),
+    ("すぇ", "swe"),
+    ("すぉ", "swo"),
+    ("つぁ", "tsa"),
+    ("つぃ", "tsi"),
+    ("つぇ", "tse"),
+    ("つぉ", "tso"),
+    ("ぬぁ", "nwa"),
+    ("ぬぃ", "nwi"),
+    ("ぬぇ", "nwe"),
+    ("ぬぉ", "nwo"),
+    ("ふぁ", "fa"),
+    ("ふぃ", "fi"),
+    ("ふぇ", "fe"),
+    ("ふぉ", "fo"),
+    ("むぁ", "mwa"),
+    ("むぃ", "mwi"),
+    ("むぇ", "mwe"),
+    ("むぉ", "mwo"),
+    ("るぁ", "rwa"),
+    ("るぃ", "rwi"),
+    ("るぇ", "rwe"),
+    ("るぉ", "rwo"),
+    ("ぐぁ", "gwa"),
+    ("ぐぃ", "gwi"),
+    ("ぐぇ", "gwe"),
+    ("ぐぉ", "gwo"),
+    ("ずぁ", "zwa"),
+    ("ずぃ", "zwi"),
+    ("ずぇ", "zwe"),
+    ("ずぉ", "zwo"),
+    ("ぶぁ", "bwa"),
+    ("ぶぃ", "bwi"),
+    ("ぶぇ", "bwe"),
+    ("ぶぉ", "bwo"),
+    ("ぷぁ", "pwa"),
+    ("ぷぃ", "pwi"),
+    ("ぷぇ", "pwe"),
+    ("ぷぉ", "pwo"),
+    ("てぃ", "ti"),
+    ("でぃ", "di"),
+    ("てゅ", "tu"),
+    ("でゅ", "du"),
+    ("とぅ", "twu"),
+    ("どぅ", "dwu"),
 ]
 
 
-def combine_audio_entries(left: OtoEntry, right: OtoEntry,
-                         output_path: Path, folder: Optional[Path],
-                         parent=None) -> Optional[float]:
+def combine_audio_entries(
+    left: OtoEntry, right: OtoEntry, output_path: Path, folder: Optional[Path], parent=None
+) -> Optional[float]:
     """拼接两段音频并保存到 output_path；返回总时长(ms)或 None。"""
     if folder is None:
         return None
@@ -199,8 +563,8 @@ def combine_audio_entries(left: OtoEntry, right: OtoEntry,
     if c_sr != v_sr:
         if parent is not None:
             messagebox.showwarning(
-                "采样率不一致",
-                f"辅音源 {c_sr} Hz 与 元音源 {v_sr} Hz 不匹配", parent=parent)
+                "采样率不一致", f"辅音源 {c_sr} Hz 与 元音源 {v_sr} Hz 不匹配", parent=parent
+            )
         return None
 
     sr = c_sr
@@ -222,8 +586,9 @@ def combine_audio_entries(left: OtoEntry, right: OtoEntry,
     return len(combined) / sr * 1000.0
 
 
-def _enhanced_crossfade(audio1: np.ndarray, audio2: np.ndarray,
-                        sr: int, max_crossfade_ms: float = 30.0) -> np.ndarray:
+def _enhanced_crossfade(
+    audio1: np.ndarray, audio2: np.ndarray, sr: int, max_crossfade_ms: float = 30.0
+) -> np.ndarray:
     """
     增强版 crossfade 拼接，使过渡更流畅：
     1. 动态 crossfade 长度（较短片段的 30%，上限 30ms，下限 5ms）
@@ -300,11 +665,12 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         self._audio_player = AudioPlayer()
         self._list_font = _get_cjk_font(10)
 
-        # 解析默认 CV
-        self._target_consonant, self._target_vowel = split_japanese_cv(default_group)
-
-        # 缓存所有分组
+        # 缓存所有分组 + 语言自动识别（ja = 假名 / zh = 拼音）
         self._all_groups = self.oto_bank.get_groups()
+        self._lang = detect_bank_language([base for base, _ in self._all_groups])
+
+        # 解析默认 CV（按语言分发：ja 日语辅音/元音，zh presamp 短 ID）
+        self._target_consonant, self._target_vowel = self._split_cv(default_group)
 
         # 当前选中的条目
         self._left_selected_entry: Optional[OtoEntry] = None
@@ -324,35 +690,43 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         top_frame = ctk.CTkFrame(self, fg_color="transparent")
         top_frame.pack(fill="x", padx=12, pady=(12, 6))
 
-        ctk.CTkLabel(top_frame, text="目标音素:",
-                     font=ctk.CTkFont(size=12, weight="bold")).pack(
-            side="left", padx=(8, 4))
+        ctk.CTkLabel(top_frame, text="目标音素:", font=ctk.CTkFont(size=12, weight="bold")).pack(
+            side="left", padx=(8, 4)
+        )
 
         self._alias_var = tk.StringVar(value=self.default_group)
         self._alias_entry = ctk.CTkEntry(
-            top_frame, textvariable=self._alias_var, width=220,
-            font=ctk.CTkFont(size=12))
+            top_frame, textvariable=self._alias_var, width=220, font=ctk.CTkFont(size=12)
+        )
         self._alias_entry.pack(side="left", padx=4)
         self._alias_entry.bind("<Return>", lambda e: self._on_alias_changed())
         self._alias_entry.bind("<FocusOut>", lambda e: self._on_alias_changed())
 
-        ctk.CTkButton(top_frame, text="平假名 ↔ 罗马音", width=140,
-                      command=self._on_toggle_script).pack(
-            side="left", padx=8)
+        # 中文无需平假名/罗马音互转，按钮禁用
+        self._toggle_btn = ctk.CTkButton(
+            top_frame, text="平假名 ↔ 罗马音", width=140, command=self._on_toggle_script
+        )
+        self._toggle_btn.pack(side="left", padx=8)
+        if self._lang == "zh":
+            self._toggle_btn.configure(state="disabled")
 
         self._cv_hint = ctk.CTkLabel(
-            top_frame, text="", font=ctk.CTkFont(size=11),
-            text_color="#888888")
+            top_frame, text="", font=ctk.CTkFont(size=11), text_color="#888888"
+        )
         self._cv_hint.pack(side="left", padx=8)
 
-        ctk.CTkLabel(top_frame, text="缺少:",
-                     font=ctk.CTkFont(size=12)).pack(
-            side="left", padx=(20, 4))
+        ctk.CTkLabel(top_frame, text="缺少:", font=ctk.CTkFont(size=12)).pack(
+            side="left", padx=(20, 4)
+        )
 
         self._missing_var = tk.StringVar(value="无")
         self._missing_menu = ctk.CTkOptionMenu(
-            top_frame, variable=self._missing_var, width=150,
-            values=["无"], command=self._on_missing_selected)
+            top_frame,
+            variable=self._missing_var,
+            width=150,
+            values=["无"],
+            command=self._on_missing_selected,
+        )
         self._missing_menu.pack(side="left", padx=4)
 
         # 中间左右两列
@@ -362,31 +736,41 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         mid_frame.grid_columnconfigure(1, weight=1)
         mid_frame.grid_rowconfigure(0, weight=1)
 
-        self._left_frame = self._build_side_panel(
-            mid_frame, 0, "辅音来源", "_left")
-        self._right_frame = self._build_side_panel(
-            mid_frame, 1, "元音来源", "_right")
+        self._left_frame = self._build_side_panel(mid_frame, 0, "辅音来源", "_left")
+        self._right_frame = self._build_side_panel(mid_frame, 1, "元音来源", "_right")
 
         # 底部按钮区
         bottom_frame = ctk.CTkFrame(self, fg_color="transparent")
         bottom_frame.pack(fill="x", padx=12, pady=(6, 12))
 
-        ctk.CTkButton(bottom_frame, text="预览最终音频", width=140,
-                      command=self._on_preview).pack(
-            side="left", padx=8, pady=8)
-        ctk.CTkButton(bottom_frame, text="应用", width=100,
-                      fg_color="#2b8a3e", hover_color="#237032",
-                      command=self._on_apply).pack(
-            side="right", padx=8, pady=8)
-        ctk.CTkButton(bottom_frame, text="取消", width=100,
-                      fg_color="transparent", border_width=1,
-                      command=self._on_close).pack(
-            side="right", padx=4, pady=8)
+        ctk.CTkButton(bottom_frame, text="预览最终音频", width=140, command=self._on_preview).pack(
+            side="left", padx=8, pady=8
+        )
+        ctk.CTkButton(
+            bottom_frame,
+            text="应用",
+            width=100,
+            fg_color="#2b8a3e",
+            hover_color="#237032",
+            command=self._on_apply,
+        ).pack(side="right", padx=8, pady=8)
+        ctk.CTkButton(
+            bottom_frame,
+            text="取消",
+            width=100,
+            fg_color="transparent",
+            border_width=1,
+            command=self._on_close,
+        ).pack(side="right", padx=4, pady=8)
 
     def _build_side_panel(self, parent, column: int, title: str, prefix: str):
         frame = ctk.CTkFrame(parent)
-        frame.grid(row=0, column=column, sticky="nsew",
-                   padx=(0 if column == 0 else 6, 6 if column == 0 else 0))
+        frame.grid(
+            row=0,
+            column=column,
+            sticky="nsew",
+            padx=(0 if column == 0 else 6, 6 if column == 0 else 0),
+        )
         frame.grid_rowconfigure(1, weight=2)
         frame.grid_rowconfigure(3, weight=2)
         frame.grid_rowconfigure(4, weight=3)
@@ -394,18 +778,24 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         frame.grid_columnconfigure(1, weight=0)
 
         # 分组列表
-        ctk.CTkLabel(frame, text=f"{title} — 分组",
-                     font=ctk.CTkFont(size=11, weight="bold"),
-                     anchor="w").grid(row=0, column=0, columnspan=2,
-                                       sticky="ew", padx=6, pady=(6, 2))
+        ctk.CTkLabel(
+            frame, text=f"{title} — 分组", font=ctk.CTkFont(size=11, weight="bold"), anchor="w"
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=6, pady=(6, 2))
 
         group_lb = DraggableListbox(
-            frame, draggable=False,
+            frame,
+            draggable=False,
             on_select=getattr(self, f"_on{prefix}_group_select"),
-            bg="#2b2b2b", fg="#d4d4d4",
-            selectbackground="#264f78", selectforeground="#ffffff",
-            font=self._list_font, activestyle="none",
-            exportselection=False, borderwidth=0, highlightthickness=0)
+            bg="#2b2b2b",
+            fg="#d4d4d4",
+            selectbackground="#264f78",
+            selectforeground="#ffffff",
+            font=self._list_font,
+            activestyle="none",
+            exportselection=False,
+            borderwidth=0,
+            highlightthickness=0,
+        )
         group_lb.grid(row=1, column=0, sticky="nsew", padx=(6, 0))
         setattr(self, f"{prefix}_group_listbox", group_lb)
 
@@ -418,18 +808,24 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         group_lb.bind("<Down>", getattr(self, f"_on{prefix}_group_key_down"))
 
         # 样本列表
-        ctk.CTkLabel(frame, text="样本",
-                     font=ctk.CTkFont(size=11, weight="bold"),
-                     anchor="w").grid(row=2, column=0, columnspan=2,
-                                       sticky="ew", padx=6, pady=(4, 2))
+        ctk.CTkLabel(frame, text="样本", font=ctk.CTkFont(size=11, weight="bold"), anchor="w").grid(
+            row=2, column=0, columnspan=2, sticky="ew", padx=6, pady=(4, 2)
+        )
 
         entry_lb = DraggableListbox(
-            frame, draggable=False,
+            frame,
+            draggable=False,
             on_select=getattr(self, f"_on{prefix}_entry_select"),
-            bg="#2b2b2b", fg="#d4d4d4",
-            selectbackground="#264f78", selectforeground="#ffffff",
-            font=self._list_font, activestyle="none",
-            exportselection=False, borderwidth=0, highlightthickness=0)
+            bg="#2b2b2b",
+            fg="#d4d4d4",
+            selectbackground="#264f78",
+            selectforeground="#ffffff",
+            font=self._list_font,
+            activestyle="none",
+            exportselection=False,
+            borderwidth=0,
+            highlightthickness=0,
+        )
         entry_lb.grid(row=3, column=0, sticky="nsew", padx=(6, 0))
         setattr(self, f"{prefix}_entry_listbox", entry_lb)
 
@@ -444,8 +840,7 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
 
         # 波形显示
         wf = WaveformDisplay(frame, width=580, height=220)
-        wf.get_widget().grid(row=4, column=0, columnspan=2,
-                              sticky="nsew", padx=6, pady=(4, 6))
+        wf.get_widget().grid(row=4, column=0, columnspan=2, sticky="nsew", padx=6, pady=(4, 6))
         setattr(self, f"{prefix}_waveform", wf)
 
         return frame
@@ -458,9 +853,17 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         self._update_cv_hint()
         self._refresh_missing_menu()
 
+    def _split_cv(self, base: str) -> Tuple[Optional[str], Optional[str]]:
+        """按当前语言拆分 (辅音, 元音)：ja = 日语辅音/元音，zh = presamp 短 ID。"""
+        if self._lang == "ja":
+            return split_japanese_cv(base)
+        return split_pinyin_cv(base)
+
     def _get_missing_phonemes(self) -> List[Tuple[str, str]]:
         existing = {base for base, _ in self._all_groups}
-        return [(h, r) for h, r in ALL_REQUIRED_PHONEMES if h not in existing]
+        if self._lang == "ja":
+            return [(h, r) for h, r in ALL_REQUIRED_PHONEMES if h not in existing]
+        return [(s, s) for s in zh_required_units() if s not in existing]
 
     def _refresh_missing_menu(self):
         missing = self._get_missing_phonemes()
@@ -487,12 +890,13 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         self._left_groups: List[Tuple[str, int]] = []
 
         candidates = [self._target_consonant]
-        fb = _CONSONANT_FALLBACK.get(self._target_consonant)
-        if fb:
-            candidates.append(fb)
+        if self._lang == "ja":
+            fb = _CONSONANT_FALLBACK.get(self._target_consonant)
+            if fb:
+                candidates.append(fb)
 
         for base, count in self._all_groups:
-            c, _ = _get_cv_of_base(base)
+            c, _ = self._split_cv(base)
             if c in candidates:
                 self._left_groups.append((base, count))
                 lb.insert(tk.END, self._format_group_label(base, count))
@@ -520,7 +924,7 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         lb.delete(0, tk.END)
         self._right_groups: List[Tuple[str, int]] = []
         for base, count in self._all_groups:
-            _, v = _get_cv_of_base(base)
+            _, v = self._split_cv(base)
             if v == self._target_vowel:
                 self._right_groups.append((base, count))
                 lb.insert(tk.END, self._format_group_label(base, count))
@@ -531,10 +935,10 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
                 self._right_groups.append((base, count))
                 lb.insert(tk.END, self._format_group_label(base, count))
 
-        # 自动选中：优先纯元音，其次默认分组，否则第0个
+        # 自动选中：优先纯元音（zh 零声母同理），其次默认分组，否则第0个
         sel = 0
         for i, (base, _) in enumerate(self._right_groups):
-            c, v = _get_cv_of_base(base)
+            c, v = self._split_cv(base)
             if c is None and v == self._target_vowel:
                 sel = i
                 break
@@ -550,8 +954,9 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
             lb.see(sel)
             self._on_right_group_select(sel)
 
-    @staticmethod
-    def _format_group_label(base: str, count: int) -> str:
+    def _format_group_label(self, base: str, count: int) -> str:
+        if self._lang == "zh":
+            return _zh_format_group_label(base, count)
         return format_group_label(base, count)
 
     # ── 事件处理（左侧） ───────────────────────────────────────
@@ -576,12 +981,10 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         self._display_entry_on_side(entry, self._left_waveform)
 
     def _on_left_group_wheel(self, event):
-        return self._handle_wheel(self._left_group_listbox, event,
-                                   self._on_left_group_select)
+        return self._handle_wheel(self._left_group_listbox, event, self._on_left_group_select)
 
     def _on_left_entry_wheel(self, event):
-        return self._handle_wheel(self._left_entry_listbox, event,
-                                   self._on_left_entry_select)
+        return self._handle_wheel(self._left_entry_listbox, event, self._on_left_entry_select)
 
     def _on_left_group_key_up(self, event):
         return self._handle_key_up(self._left_group_listbox, self._on_left_group_select)
@@ -600,8 +1003,8 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
             wav = self.oto_bank.folder_path / self._left_selected_entry.wav_filename
             if wav.exists():
                 self._audio_player.play_segment(
-                    wav, self._left_selected_entry.offset,
-                    self._left_selected_entry.cutoff)
+                    wav, self._left_selected_entry.offset, self._left_selected_entry.cutoff
+                )
 
     # ── 事件处理（右侧） ───────────────────────────────────────
 
@@ -625,12 +1028,10 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         self._display_entry_on_side(entry, self._right_waveform)
 
     def _on_right_group_wheel(self, event):
-        return self._handle_wheel(self._right_group_listbox, event,
-                                   self._on_right_group_select)
+        return self._handle_wheel(self._right_group_listbox, event, self._on_right_group_select)
 
     def _on_right_entry_wheel(self, event):
-        return self._handle_wheel(self._right_entry_listbox, event,
-                                   self._on_right_entry_select)
+        return self._handle_wheel(self._right_entry_listbox, event, self._on_right_entry_select)
 
     def _on_right_group_key_up(self, event):
         return self._handle_key_up(self._right_group_listbox, self._on_right_group_select)
@@ -649,8 +1050,8 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
             wav = self.oto_bank.folder_path / self._right_selected_entry.wav_filename
             if wav.exists():
                 self._audio_player.play_segment(
-                    wav, self._right_selected_entry.offset,
-                    self._right_selected_entry.cutoff)
+                    wav, self._right_selected_entry.offset, self._right_selected_entry.cutoff
+                )
 
     # ── 通用列表交互辅助 ───────────────────────────────────────
 
@@ -666,10 +1067,14 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         wav_path = self.oto_bank.folder_path / entry.wav_filename
         if wav_path.exists():
             waveform.load_with_oto(
-                wav_path, entry.offset, entry.consonant, entry.cutoff,
-                entry.overlap, entry.preutterance)
-            self._audio_player.play_segment(
-                wav_path, entry.offset, entry.cutoff)
+                wav_path,
+                entry.offset,
+                entry.consonant,
+                entry.cutoff,
+                entry.overlap,
+                entry.preutterance,
+            )
+            self._audio_player.play_segment(wav_path, entry.offset, entry.cutoff)
         else:
             waveform.clear()
 
@@ -714,7 +1119,11 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
     def _update_cv_hint(self):
         c = self._target_consonant or "∅"
         v = self._target_vowel or "∅"
-        self._cv_hint.configure(text=f"辅音: {c}  |  元音: {v}")
+        lang_name = "中文" if self._lang == "zh" else "日语"
+        label = f"[{lang_name}] 辅音: {c} | 元音: {v}"
+        if self._lang == "zh" and c != "∅":
+            label += "（presamp 短 ID）"
+        self._cv_hint.configure(text=label)
 
     # ── 输入框与转换 ───────────────────────────────────────────
 
@@ -722,12 +1131,14 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         text = self._alias_var.get().strip()
         if not text:
             return
-        self._target_consonant, self._target_vowel = split_japanese_cv(text)
+        self._target_consonant, self._target_vowel = self._split_cv(text)
         self._update_cv_hint()
         self._rebuild_left_groups()
         self._rebuild_right_groups()
 
     def _on_toggle_script(self):
+        if self._lang == "zh":
+            return  # 中文别名即拼音，无需假名互转
         text = self._alias_var.get().strip()
         if not text:
             return
@@ -743,10 +1154,10 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
 
     # ── 音频拼接 ───────────────────────────────────────────────
 
-    def _combine_audio(self, left: OtoEntry, right: OtoEntry,
-                       output_path: Path) -> Optional[float]:
+    def _combine_audio(self, left: OtoEntry, right: OtoEntry, output_path: Path) -> Optional[float]:
         total_ms = combine_audio_entries(
-            left, right, output_path, self.oto_bank.folder_path, parent=self)
+            left, right, output_path, self.oto_bank.folder_path, parent=self
+        )
         return total_ms
 
     # ── 预览 ───────────────────────────────────────────────────
@@ -759,8 +1170,8 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         fd, tmp_path = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
         total_ms = self._combine_audio(
-            self._left_selected_entry, self._right_selected_entry,
-            Path(tmp_path))
+            self._left_selected_entry, self._right_selected_entry, Path(tmp_path)
+        )
         if total_ms is None:
             try:
                 os.remove(tmp_path)
@@ -792,8 +1203,8 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         wav_path = folder / wav_name
 
         total_ms = self._combine_audio(
-            self._left_selected_entry, self._right_selected_entry,
-            wav_path)
+            self._left_selected_entry, self._right_selected_entry, wav_path
+        )
         if total_ms is None:
             return
 
@@ -825,7 +1236,8 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
             f"已生成 {wav_name} 并添加到 oto.ini\n"
             f"别名: {entry.alias}\n"
             f"请记得点击主窗口「保存 oto.ini」写入磁盘。",
-            parent=self)
+            parent=self,
+        )
         self._on_close()
 
     def _get_unique_wav_name(self, alias: str) -> str:

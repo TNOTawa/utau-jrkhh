@@ -285,13 +285,21 @@ preutterance_VC  = vowel_dur × vc_offset_ratio     # 默认 0.5
 offset_VC        = vowel_end - preutterance_VC
 next_vowel_start = V.offset + V.consonant
 window           = next_vowel_start - offset_VC
-consonant_VC     = window                          # = 元音尾 + V 辅音整段
+vowel_tail       = max(window × 0.2, 1 sample)     # 保留元音尾（兼容性，见下）
+consonant_VC     = window - vowel_tail             # < |cutoff_VC|，恒有非空元音区
 cutoff_VC        = -window
 overlap_VC       = preutterance_VC × vc_overlap_ratio  # 默认 0.5
 ```
 
+> **VC 元音尾（兼容性修正）**：consonant_VC 不得占满整个窗口——元音区为 0
+> （consonant == |cutoff|）的条目会被 hifisampler 等严格重采样器拒绝，
+> 生态中文/日语 VCV 音源（如 Nottthat_VCV）的 VC 条目 consonant 均只占窗口
+> 53%~92%。本公式保留 ≥ 窗口 20%（至少 1 采样）的元音尾，保证
+> `consonant_VC < |cutoff_VC|`；preutterance_VC 亦恒 ≤ consonant_VC。
+
 - 守卫：`vowel_dur ≤ 0`、`V.consonant ≤ 0`、`window ≤ 0`、
-  `preutterance_VC > window`（标注重叠）→ 不生成；
+  `preutterance_VC > window`（标注重叠）、`preutterance_VC > consonant_VC`、
+  `consonant_VC ≤ 0`（窗口过小）→ 不生成；
   ratio ∉ [0,1] → 编译错误。
 - 生成条件：仅句内相邻（`x-` 辅助拍透明借位配对、按归一化坐标对去重；
   只穿过启用的辅助拍）；U 有 `vc_vowel`、V 有 `vc_consonant`；
@@ -533,6 +541,10 @@ v0.1 内置包：
   与原版别名命名空间必然不相交——导入/导出均校验）；
 - 追加行 = VC（`compile --cvvc` 派生）+ **派生 CV**（仅对原版中不存在的
   base 别名追加——拼字 Unit、或人工剥离版剔除的音节自动补齐；绝不与原版重复）；
+- 可选 `--substitute {缺失label: 来源label}`：对「交付物别名全集仍缺失」的
+  音节追加 `source_wav=<label>,<来源参数>`（复用已有近似录音，如零声母
+  lve/nve → 同韵母 yue；UTAU 标准拼写不收录 lve/nve，替代为合法拼音音节）；
+  纯增量、不与任何已有别名冲突（目标已存在/来源不存在时报错，不影响默认输出）；
 - 中文母版另交付 `presamp.ini`（内置标准模板逐字节；OpenUtau 内置 zh-cvv
   音素器依赖它生成短 ID VC 别名）；
 - 原版引用的 wav 从原版目录原样拷贝；追加行引用母版句 wav（整资产句

@@ -62,12 +62,24 @@
 
 ## 后续工作（未做，按需开启）
 
+- [x] **DJUTAU_CVVC 正式交付**（`E:\Singer\DJUTAU_CVVC`，2026-08-24 生成）：
+      原版 2042 条逐字节 + VC 3324 + 派生 CV 119 + presamp.ini + wav 拷贝；
+      410 音节全量覆盖（`export-vc --substitute`：lve/nve → yue 替代追加，
+      实测覆盖 410/410、无重复别名、基线逐字节保真）。
+- [x] **VC 公式兼容性修正**（2026-08-24）：consonant_VC = 区域 − 20% 元音尾
+      （>0），杜绝元音区为 0（con==|cut|）的条目——hifisampler 等严格重采样器
+      会拒绝该类数据（生态 bank 如 Nottthat_VCV 的 VC 条目 consonant 均只占
+      窗口 53%~92%）；新增守卫：preutterance>consonant / consonant≤0 → 不生成
+      （标注重叠、窗口过小的退化条目）。DJUTAU_CVVC 已重导出
+      （VC 3479→3324，全部 con<|cut|，155 条退化条目被剔除）。
+- [x] **GUI 批量拼字支持中文音源**（2026-08-24）：按别名脚本自动识别语言，
+      中文用 410 音节 + presamp 短 ID 分组（复用 `jrh.languages.pinyin/presamp`），
+      零声母/未枚举音节（ang/eng/lve…）列入「跳过」清单提示需原版录音。
 - [ ] **presamp.ini 子集裁剪版**（按 bank 实际覆盖裁剪；用户已同意留作 TODO，
       当前交付完整标准模板）。
 - [ ] **中文标注人工精修后重新导出**：`import-henki`（DJUTAU）→ `combine`（全自动）→
       用户手动精修母版 timing/标注 → `export-vc`。当前流程已按此设计就绪；
       DJUTAU 实测导入：459 句 / 4005 单元 / 原版 1018 条参数吸收（其余逐条报告）。
-- [ ] 用户的**人工剥离版 oto** 到位后替换 `--oto` 输入做最终交付验证。
 - [ ] 三色あやか 转 JRH（无 TextGrid 路径，价值存疑，暂缓）。
 - [ ] 日语 `jrh combine`（机制可扩展，本轮锁定中文）。
 - [ ] 句 wav 冲突检测的极端场景加固（同名不同资产的手工项目）。

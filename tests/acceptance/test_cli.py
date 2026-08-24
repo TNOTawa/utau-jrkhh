@@ -287,6 +287,29 @@ class TestImportExportCLI:
         assert data[: len(orig)] == orig
         assert "=a t," in data[len(orig) :].decode("ascii")
 
+    def test_export_vc_substitute(self, tmp_path):
+        dirs = self._bank(tmp_path)
+        proj = tmp_path / "p.jrh"
+        r = run_cli(
+            "import-henki",
+            str(dirs["bank_dir"]),
+            "--out",
+            str(proj),
+            "--oto",
+            str(dirs["oto_dir"] / "oto.ini"),
+        )
+        assert r.returncode == 0, r.stderr
+        cvvc = tmp_path / "cvvc"
+        r = run_cli("export-vc", str(proj), "--out", str(cvvc), "--substitute", '{"zum":"ka"}')
+        assert r.returncode == 0, r.stderr
+        orig = (dirs["oto_dir"] / "oto.ini").read_bytes()
+        data = (cvvc / "oto.ini").read_bytes()
+        assert data[: len(orig)] == orig  # 基线逐字节保真
+        tail = data[len(orig) :].decode("ascii")
+        # zum 复用 ka 的 wav+参数（原版优先，文件序最后一个 ka 胜出）
+        assert "song-001_0000.wav=zum,0,100,-300,100,30" in tail
+        assert "substituted_entries" in (cvvc / "vc-supplement-report.json").read_text()
+
     def test_import_henki_dry_run_json(self, tmp_path):
         dirs = self._bank(tmp_path)
         r = run_cli(

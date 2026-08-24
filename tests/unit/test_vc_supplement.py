@@ -114,3 +114,54 @@ class TestVcSupplementZh:
 
         with pytest.raises(DataError, match="空格"):
             export_vc_supplement(proj, tmp_path / "cvvc")
+
+
+class TestVcSupplementSubstitution:
+    """substitutions：缺失 label → 复用已有来源别名追加（纯增量，默认关闭）。"""
+
+    @pytest.fixture()
+    def zh_imported(self, tmp_path):
+        from fixtures.henki_bank_zh import OTO_TEXT_STRIPPED, build_henki_bank_zh
+
+        dirs = build_henki_bank_zh(tmp_path, oto_text=OTO_TEXT_STRIPPED)
+        out = tmp_path / "p.jrh"
+        import_henki_bank(dirs["bank_dir"], out, oto_ini=dirs["oto_dir"] / "oto.ini")
+        return dirs, JRHProject.open(out)
+
+    def test_substitution_appends_reusing_source(self, zh_imported, tmp_path):
+        dirs, proj = zh_imported
+        out = tmp_path / "cvvc"
+        report = export_vc_supplement(proj, out, substitutions={"zui": "kan"})
+        orig = (dirs["oto_dir"] / "oto.ini").read_bytes()
+        data = (out / "oto.ini").read_bytes()
+        assert data[: len(orig)] == orig  # 基线逐字节保真
+        tail = data[len(orig) :].decode("ascii")
+        # kan = qfcy_0005.wav=kan,0,80,-450,80,24 → zui 复用其 wav+参数
+        assert "qfcy_0005.wav=zui,0,80,-450,80,24" in tail
+        assert report["substituted_entries"] == 1
+        assert report["substituted_aliases"] == ["zui"]
+        assert (out / "qfcy_0005.wav").exists()
+
+    def test_substitution_target_conflict(self, zh_imported, tmp_path):
+        from jrh.core.errors import DataError
+
+        _dirs, proj = zh_imported
+        with pytest.raises(DataError, match="已存在"):
+            export_vc_supplement(proj, tmp_path / "c", substitutions={"kan": "kan"})
+
+    def test_substitution_unknown_source(self, zh_imported, tmp_path):
+        from jrh.core.errors import DataError
+
+        _dirs, proj = zh_imported
+        with pytest.raises(DataError, match="来源别名不存在"):
+            export_vc_supplement(proj, tmp_path / "c", substitutions={"zui": "zyx"})
+
+    def test_default_no_substitution_unchanged(self, zh_imported, tmp_path):
+        _dirs, proj = zh_imported
+        r1 = export_vc_supplement(proj, tmp_path / "c1")
+        r2 = export_vc_supplement(proj, tmp_path / "c2", substitutions=None)
+        assert r1["substituted_entries"] == 0
+        assert r1["substituted_aliases"] == []
+        assert {k: v for k, v in r1.items() if k != "output"} == {
+            k: v for k, v in r2.items() if k != "output"
+        }

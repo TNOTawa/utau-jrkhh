@@ -11,7 +11,6 @@ def _get_cjk_font(size: int = 10) -> tuple:
 
 
 class DraggableListbox(tk.Listbox):
-
     def __init__(self, master, on_reorder=None, on_select=None, draggable=True, **kwargs):
         super().__init__(master, **kwargs)
         self._on_reorder_callback = on_reorder
@@ -56,8 +55,9 @@ class DraggableListbox(tk.Listbox):
         frame = tk.Frame(self._drag_label, bg="#3a3a3a", bd=1, relief=tk.SOLID)
         frame.pack(fill=tk.BOTH, expand=True)
         font_spec = _get_cjk_font(10)
-        label = tk.Label(frame, text=item_text, bg="#3a3a3a", fg="#ffffff",
-                         font=font_spec, padx=8, pady=2)
+        label = tk.Label(
+            frame, text=item_text, bg="#3a3a3a", fg="#ffffff", font=font_spec, padx=8, pady=2
+        )
         label.pack()
         x = self.winfo_rootx() + event.x + 10
         y = self.winfo_rooty() + event.y - 10

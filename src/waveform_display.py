@@ -25,6 +25,7 @@ def _cache_dir() -> Path:
     global _CACHE_DIR
     if _CACHE_DIR is None:
         import tempfile
+
         _CACHE_DIR = Path(tempfile.gettempdir()) / "utau_waveform_cache"
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     return _CACHE_DIR
@@ -63,9 +64,12 @@ def _load_or_compute(wav_path: Path) -> Optional[dict]:
             sp = np.load(sp_cache)
             perf_trace.end(t0, "wf:cache hit")
             return {
-                "data": wf["data"], "sr": float(wf["sr"]),
+                "data": wf["data"],
+                "sr": float(wf["sr"]),
                 "dur": float(wf["dur"]),
-                "sp_t": sp["t"], "sp_f": sp["f"], "sp_db": sp["db"],
+                "sp_t": sp["t"],
+                "sp_f": sp["f"],
+                "sp_db": sp["db"],
             }
         except Exception:
             pass
@@ -88,8 +92,8 @@ def _load_or_compute(wav_path: Path) -> Optional[dict]:
 
     t3 = perf_trace.trace("wf:spectrogram")
     freqs, times, sxx = spectrogram(
-        raw, fs=sr, nperseg=_SPEC_NFFT,
-        noverlap=_SPEC_NFFT // 2, mode="magnitude")
+        raw, fs=sr, nperseg=_SPEC_NFFT, noverlap=_SPEC_NFFT // 2, mode="magnitude"
+    )
     sxx_db = 20 * np.log10(sxx + 1e-12)
     db_min, db_max = np.percentile(sxx_db, [1, 99])
     sxx_db = np.clip(sxx_db, db_min, db_max).astype(np.float32)
@@ -106,8 +110,12 @@ def _load_or_compute(wav_path: Path) -> Optional[dict]:
     perf_trace.end(t4, "wf:save cache")
 
     return {
-        "data": ds, "sr": float(sr), "dur": dur,
-        "sp_t": times, "sp_f": freqs, "sp_db": sxx_db,
+        "data": ds,
+        "sr": float(sr),
+        "dur": dur,
+        "sp_t": times,
+        "sp_f": freqs,
+        "sp_db": sxx_db,
     }
 
 
@@ -165,13 +173,17 @@ class WaveformDisplay:
             ax.spines["right"].set_visible(False)
             ax.yaxis.set_visible(False)
         self.ax_wave.tick_params(bottom=False, labelbottom=False)
-        self.figure.subplots_adjust(
-            left=0.02, right=0.99, top=0.97, bottom=0.04,
-            hspace=0.05)
+        self.figure.subplots_adjust(left=0.02, right=0.99, top=0.97, bottom=0.04, hspace=0.05)
 
-    def load_with_oto(self, wav_path: Path, offset_ms: float, consonant_ms: float,
-                      cutoff_ms: float, overlap_ms: float = 0.0,
-                      preutterance_ms: float = 0.0):
+    def load_with_oto(
+        self,
+        wav_path: Path,
+        offset_ms: float,
+        consonant_ms: float,
+        cutoff_ms: float,
+        overlap_ms: float = 0.0,
+        preutterance_ms: float = 0.0,
+    ):
         perf_trace.trace("wf:load_with_oto")
         self._pending = {
             "wav_path": wav_path,
@@ -195,10 +207,16 @@ class WaveformDisplay:
             self.parent.after(0, self._render_error)
             return
         self.parent.after(
-            0, lambda: self._render(
+            0,
+            lambda: self._render(
                 result,
-                p["offset_ms"], p["consonant_ms"], p["cutoff_ms"],
-                p["overlap_ms"], p["preutterance_ms"]))
+                p["offset_ms"],
+                p["consonant_ms"],
+                p["cutoff_ms"],
+                p["overlap_ms"],
+                p["preutterance_ms"],
+            ),
+        )
 
     def _render_error(self):
         for ax in (self.ax_wave, self.ax_spec):
@@ -215,9 +233,16 @@ class WaveformDisplay:
         self._last_params = None
         self.canvas.draw_idle()
 
-    def _draw_oto_markers(self, offset_s: float, consonant_end_s: float,
-                          segment_end_s: float, overlap_s: float,
-                          preutterance_s: float, dur: float, amp_val: float):
+    def _draw_oto_markers(
+        self,
+        offset_s: float,
+        consonant_end_s: float,
+        segment_end_s: float,
+        overlap_s: float,
+        preutterance_s: float,
+        dur: float,
+        amp_val: float,
+    ):
         if not (0 <= offset_s <= dur):
             return
         markers = [
@@ -231,12 +256,19 @@ class WaveformDisplay:
             if not (0 <= x <= dur):
                 continue
             for ax in (self.ax_wave, self.ax_spec):
-                ax.axvline(x=x, color=color, linestyle=ls, linewidth=lw,
-                           alpha=0.9, zorder=4)
+                ax.axvline(x=x, color=color, linestyle=ls, linewidth=lw, alpha=0.9, zorder=4)
             if label:
-                self.ax_wave.text(x, amp_val * 0.88, label, color=color,
-                                  fontsize=8, ha='center', va='top',
-                                  fontweight='bold', zorder=5)
+                self.ax_wave.text(
+                    x,
+                    amp_val * 0.88,
+                    label,
+                    color=color,
+                    fontsize=8,
+                    ha="center",
+                    va="top",
+                    fontweight="bold",
+                    zorder=5,
+                )
 
     @staticmethod
     def _downsample_2d(arr: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
@@ -277,8 +309,8 @@ class WaveformDisplay:
         t = self._spec_times
         f = self._spec_freqs
 
-        t_idx_start = max(0, np.searchsorted(t, x0, side='left') - 1)
-        t_idx_end = min(len(t), np.searchsorted(t, x1, side='right') + 1)
+        t_idx_start = max(0, np.searchsorted(t, x0, side="left") - 1)
+        t_idx_end = min(len(t), np.searchsorted(t, x1, side="right") + 1)
         if t_idx_start >= t_idx_end:
             return
 
@@ -293,14 +325,23 @@ class WaveformDisplay:
         # 初始数据为全零导致 vmin=vmax=0，set_data 后需恢复颜色范围
         self._spec_img.autoscale()
 
-    def _render(self, result: dict, offset_ms: float, consonant_ms: float,
-                cutoff_ms: float, overlap_ms: float, preutterance_ms: float,
-                preserve_view: bool = False):
+    def _render(
+        self,
+        result: dict,
+        offset_ms: float,
+        consonant_ms: float,
+        cutoff_ms: float,
+        overlap_ms: float,
+        preutterance_ms: float,
+        preserve_view: bool = False,
+    ):
         t0 = perf_trace.trace("wf:_render")
         self._last_result = result
         self._last_params = {
-            "offset_ms": offset_ms, "consonant_ms": consonant_ms,
-            "cutoff_ms": cutoff_ms, "overlap_ms": overlap_ms,
+            "offset_ms": offset_ms,
+            "consonant_ms": consonant_ms,
+            "cutoff_ms": cutoff_ms,
+            "overlap_ms": overlap_ms,
             "preutterance_ms": preutterance_ms,
         }
         data = result["data"]
@@ -324,33 +365,52 @@ class WaveformDisplay:
         amp_val = max(abs(data.min()), abs(data.max())) * 1.1 or 1.0
 
         # 1. 淡色完整波形（外部区域）
-        self.ax_wave.plot(time_axis, data, color="#4ec9b0", linewidth=0.35,
-                          alpha=0.35, zorder=1)
+        self.ax_wave.plot(time_axis, data, color="#4ec9b0", linewidth=0.35, alpha=0.35, zorder=1)
 
         # 2. 音素有效区域高亮背景（完整矩形填充）
         if 0 <= offset_s < segment_end_s:
             rect = patches.Rectangle(
-                (offset_s, -amp_val), segment_end_s - offset_s, 2 * amp_val,
-                linewidth=0, facecolor='#0a0a12',
-                alpha=0.98, zorder=2)
+                (offset_s, -amp_val),
+                segment_end_s - offset_s,
+                2 * amp_val,
+                linewidth=0,
+                facecolor="#0a0a12",
+                alpha=0.98,
+                zorder=2,
+            )
             self.ax_wave.add_patch(rect)
 
             # 3. 区域内亮色波形（裁剪到高亮区域）
             clip_rect = patches.Rectangle(
-                (offset_s, -amp_val), segment_end_s - offset_s, 2 * amp_val,
-                transform=self.ax_wave.transData)
-            self.ax_wave.plot(time_axis, data, color="#4ec9b0", linewidth=0.8,
-                              alpha=1.0, clip_path=clip_rect, zorder=3)
+                (offset_s, -amp_val),
+                segment_end_s - offset_s,
+                2 * amp_val,
+                transform=self.ax_wave.transData,
+            )
+            self.ax_wave.plot(
+                time_axis,
+                data,
+                color="#4ec9b0",
+                linewidth=0.8,
+                alpha=1.0,
+                clip_path=clip_rect,
+                zorder=3,
+            )
 
             # 4. “厂”字形折线边框：offset底部 → OVL顶部 → segment_end顶部
             self.ax_wave.plot(
                 [offset_s, overlap_s, segment_end_s],
                 [-amp_val, amp_val, amp_val],
-                color='#5b8cff', linewidth=1.8,
-                solid_joinstyle='miter', alpha=0.98, zorder=4)
+                color="#5b8cff",
+                linewidth=1.8,
+                solid_joinstyle="miter",
+                alpha=0.98,
+                zorder=4,
+            )
 
-        self._draw_oto_markers(offset_s, consonant_end_s, segment_end_s,
-                               overlap_s, preutterance_s, dur, amp_val)
+        self._draw_oto_markers(
+            offset_s, consonant_end_s, segment_end_s, overlap_s, preutterance_s, dur, amp_val
+        )
 
         if preserve_view and old_xlim is not None:
             lo, hi = old_xlim
@@ -371,10 +431,13 @@ class WaveformDisplay:
         if self._spec_times is not None:
             self._spec_img = self.ax_spec.imshow(
                 np.zeros((2, 2), dtype=np.float32),
-                aspect="auto", origin="lower",
+                aspect="auto",
+                origin="lower",
                 extent=[0, dur, self._spec_freqs[0], self._spec_freqs[-1]],
-                cmap="inferno", interpolation="bilinear",
-                rasterized=True)
+                cmap="inferno",
+                interpolation="bilinear",
+                rasterized=True,
+            )
             if preserve_view and old_xlim is not None:
                 lo, hi = old_xlim
                 lo = max(0.0, lo)
@@ -462,9 +525,7 @@ class WaveformDisplay:
         self.ax_spec.set_visible(True)
         self._update_spec_view()
         self.canvas.draw_idle()
-        perf_trace.end(
-            perf_trace.trace(""),
-            f"wf:pan frames={self._motion_count}")
+        perf_trace.end(perf_trace.trace(""), f"wf:pan frames={self._motion_count}")
         self._motion_count = 0
 
     def _pan(self, dx_data: float):
@@ -477,7 +538,7 @@ class WaveformDisplay:
             new_hi -= new_lo
             new_lo = 0
         if new_hi > self._total_duration:
-            new_lo -= (new_hi - self._total_duration)
+            new_lo -= new_hi - self._total_duration
             new_hi = self._total_duration
         if new_lo < 0:
             new_lo = 0
@@ -503,13 +564,25 @@ class WaveformDisplay:
     def get_mouse_time(self) -> Optional[float]:
         return self._last_xdata if self._mouse_in else None
 
-    def update_params(self, offset_ms: float, consonant_ms: float,
-                      cutoff_ms: float, overlap_ms: float = 0.0,
-                      preutterance_ms: float = 0.0):
+    def update_params(
+        self,
+        offset_ms: float,
+        consonant_ms: float,
+        cutoff_ms: float,
+        overlap_ms: float = 0.0,
+        preutterance_ms: float = 0.0,
+    ):
         if self._last_result is None:
             return
-        self._render(self._last_result, offset_ms, consonant_ms, cutoff_ms,
-                     overlap_ms, preutterance_ms, preserve_view=True)
+        self._render(
+            self._last_result,
+            offset_ms,
+            consonant_ms,
+            cutoff_ms,
+            overlap_ms,
+            preutterance_ms,
+            preserve_view=True,
+        )
 
     def _on_motion(self, event):
         if event.xdata is not None:
@@ -533,7 +606,7 @@ class WaveformDisplay:
             new_hi -= new_lo
             new_lo = 0
         if new_hi > self._total_duration:
-            new_lo -= (new_hi - self._total_duration)
+            new_lo -= new_hi - self._total_duration
             new_hi = self._total_duration
         if new_lo < 0:
             new_lo = 0

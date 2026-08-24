@@ -234,6 +234,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sp = cmd("export-vc", "从 henki 导入的母版导出 CVVC 补充（原版逐行 + VC 追加）", _cmd_export_vc)
     _add_project_arg(sp)
     sp.add_argument("--out", required=True, help="输出音源目录")
+    sp.add_argument(
+        "--substitute",
+        default=None,
+        help='缺失音节替代 JSON（{"缺失label": "已有来源label"}，如 {"lve": "yue", "nve": "yue"}）',
+    )
 
     # ── combine（母版侧自动拼字） ─────────────────────────────
     sp = cmd("combine", "母版侧自动拼字：补全缺失 CV 音节（crossfade 合成，中文）", _cmd_combine)
@@ -715,7 +720,8 @@ def _cmd_export_vc(args) -> int:
     from ..exporters.vc_supplement import export_vc_supplement
 
     proj = _load(args.project)
-    report = export_vc_supplement(proj, args.out)
+    substitutions = json.loads(args.substitute) if args.substitute else None
+    report = export_vc_supplement(proj, args.out, substitutions=substitutions)
     if args.format == "json":
         _emit(args, report)
     else:
@@ -723,6 +729,7 @@ def _cmd_export_vc(args) -> int:
             args,
             f"VC 补充导出完成: 原版条目 {report['original_entries']} 逐行保留 +"
             f" VC {report['vc_entries']} 条 + 派生 CV {report['appended_cv_entries']} 条"
+            f" + 替换 {report['substituted_entries']} 条"
             f"{' + presamp.ini' if report['presamp_ini'] else ''}\n输出: {report['output']}",
         )
     return 0

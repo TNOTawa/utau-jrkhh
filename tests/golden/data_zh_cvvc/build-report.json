@@ -137,7 +137,7 @@
       "alias": "i h",
       "kind": "vc",
       "params": {
-        "consonant": 475.0,
+        "consonant": 380.0,
         "cutoff": -475.0,
         "offset": 575.0,
         "overlap": 137.5,
@@ -317,7 +317,7 @@
       "alias": "o h",
       "kind": "vc",
       "params": {
-        "consonant": 325.0,
+        "consonant": 260.0,
         "cutoff": -325.0,
         "offset": 475.0,
         "overlap": 87.5,
@@ -392,7 +392,7 @@
       "alias": "ao m",
       "kind": "vc",
       "params": {
-        "consonant": 125.0,
+        "consonant": 100.0,
         "cutoff": -125.0,
         "offset": 875.0,
         "overlap": 37.5,
@@ -527,7 +527,7 @@
       "alias": "ao j",
       "kind": "vc",
       "params": {
-        "consonant": 350.0,
+        "consonant": 280.0,
         "cutoff": -350.0,
         "offset": 450.0,
         "overlap": 100.0,
