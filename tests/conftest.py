@@ -22,6 +22,7 @@ else:
 
 from fixtures.builder import (  # noqa: E402
     build_demo_project,
+    build_ja_demo_project,
 )
 
 
@@ -41,3 +42,9 @@ def demo_project_frozen(tmp_path: Path):
 def demo_project_noaudio(tmp_path: Path):
     """无真实音频文件的演示项目（文件缺失场景）。"""
     return build_demo_project(tmp_path, with_audio=False)
+
+
+@pytest.fixture()
+def ja_demo_project(tmp_path: Path):
+    """日语演示项目（含音频；CVVC 测试用）。"""
+    return build_ja_demo_project(tmp_path)

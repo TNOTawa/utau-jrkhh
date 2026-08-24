@@ -497,6 +497,12 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
                 self._left_groups.append((base, count))
                 lb.insert(tk.END, self._format_group_label(base, count))
 
+        # 保底回退：找不到任何匹配候选时，开放全部音素供选择
+        if not self._left_groups:
+            for base, count in self._all_groups:
+                self._left_groups.append((base, count))
+                lb.insert(tk.END, self._format_group_label(base, count))
+
         # 自动选中
         sel = 0
         for i, (base, _) in enumerate(self._left_groups):
@@ -516,6 +522,12 @@ class PhonemeCombineDialog(ctk.CTkToplevel):
         for base, count in self._all_groups:
             _, v = _get_cv_of_base(base)
             if v == self._target_vowel:
+                self._right_groups.append((base, count))
+                lb.insert(tk.END, self._format_group_label(base, count))
+
+        # 保底回退：找不到任何匹配候选时，开放全部音素供选择
+        if not self._right_groups:
+            for base, count in self._all_groups:
                 self._right_groups.append((base, count))
                 lb.insert(tk.END, self._format_group_label(base, count))
 

@@ -117,6 +117,7 @@ python main.py
 基于 `list.txt` 的 119 个完整音素对照 `ALL_REQUIRED_PHONEMES`，检测缺失音素并批量生成：
 - 自动分组缺失音素的辅音/元音类型，左右两栏分别配置来源样本
 - 辅音候选分组支持降级回退（`_CONSONANT_FALLBACK`：如 `pw→p`, `ky→k`）
+- 保底回退：某辅音/元音类型在音源中找不到任何候选分组时，开放全部音素供选择（避免永久「待配置」堵死生成）
 - 底栏总览用红/绿标注每个缺失音素的配置状态
 - 一键生成：遍历所有缺失音素，用各自的辅音/元音样本组合生成 wav + oto 条目
 - 生成逻辑与新增拼字一致
@@ -133,6 +134,14 @@ hiragana_to_romaji(text) → str                  # 平假名 → 罗马音
 ### 平假名/罗马音双向转换
 - `hiragana_to_romaji()`（`oto_parser.py`）：支持所有 119 个音素 + 小写假名/促音
 - `_romaji_to_hiragana()`（`phoneme_combine_dialog.py`）：反向转换，最长前缀匹配（3→2→1 字符）
+
+### 生成 CVVC VC（v3）
+- 工具栏「生成 CVVC VC」按钮：选择 **JRH 母版项目文件夹**（含 `manifest.json`，非普通音源文件夹）
+- 后台线程进程内调用 `jrh.cli.main.run_cli(["compile", <项目>, "--cvvc"])`（主线程零阻塞，编译期间按钮禁用防重入）
+- 成功后自动在 GUI 中打开编译产物目录 `builds/openutau-jrh`（oto.ini + 句 WAV，
+  含空格分隔的 VC 别名如 `a k`，GUI 按 `get_base_phoneme` 归组为 `a t`/`o n` 等）；
+  失败时弹窗展示编译 stderr（退出码 3 = 验证/别名冲突）。
+- 产物目录缺 `character.txt` 属正常（`OtoBank._load_character` 静默降级）。
 
 ## 常规操作
 - 打开音源：工具栏「打开音源文件夹」，选择含 `oto.ini` 的目录
@@ -161,6 +170,18 @@ hiragana_to_romaji(text) → str                  # 平假名 → 罗马音
   `[offset, offset+consonant]`（consonant>0 才生成）；`$B` 主体 =
   `[offset+preutterance, offset+|cutoff|]`；CV 别名 = 与 `$B` 同区域，
   按候选分组有效顺序命名（`hao`/`hao1`/...）。毫秒换算 `round(x*1000/sr, 3)`。
+- **VC 派生（CVVC，可选）**：`compile --cvvc`（`CompileConfig.cvvc`，默认关）时生成。
+  别名 = `{前单元元音} {下一单元起音辅音}`（**空格分隔**，如 `a k`、`a t1`）；
+  区域 = 当前元音后半 + 下一辅音整段（止于下一元音起点）；公式在
+  `Timing.vc_timing()`（`vc_offset_ratio`/`vc_overlap_ratio` 默认 0.5，ratio ∉ [0,1] 报错）。
+  仅句内相邻配对（日语 x- 辅助拍如 `xtsu` 透明借位、按归一化坐标对去重）；
+  下一单元辅音>0 才生成；无 ENDING、不跨句；ん 全辅音拍整体作 C 侧（`a n`）。
+  **中文 VC 别名 = presamp 短 ID**（`an t`/`ir zh`/`i0 c`/`e0 j`/`vn q`/`i ny`/`a hw`），
+  由 `pinyin.py` 的 `vc_vowel`/`vc_consonant` 返回，短 ID 表 = 内置标准 presamp.ini
+  （`jrh/languages/presamp.py`，与交付文件和 OpenUtau 内置 zh-cvv 音素器同源）；
+  枚举外音节（`yo` 等）两侧 None → 不生成 VC（与 OpenUtau 回退一致）。
+  VC 条目复用句 WAV，无合成。**默认编译产物与历史逐字节一致**；
+  cvvc golden 在 `tests/golden/data_cvvc/`（日语）与 `tests/golden/data_zh_cvvc/`（中文）。
 - **冻结**：`freeze` 一次性；冻结后编号只增不改、不复用（每句 `max_unit_id_ever` +
   全局 `max_sentence_id_ever`）；改文字/边界/重分析不改变编号。
 - **选择回退**（`selection.py`）：原句连续 → FULL（前元音匹配）→ `$T`+`$B` →
@@ -180,6 +201,29 @@ python tools/mutate.py
 python tools/smoke_cli.py
 python tests/golden/generate_golden.py     # 修改编译规则后重新生成 golden
 ```
+
+### 外部数据导入 / VC 补充导出（JRH_SPEC §12）
+- `jrh import-henki <bank> --out <dir> [--oto <oto.ini>] [--dry-run]`：
+  人力V助手 bank（slices+TextGrid）→ JRH 母版，按 `meta.language` 自动分发——
+  **日语**（`jrh.ja-romaji`，同段切片拼接成句，`jrh/importers/mfa_ja.py`）与
+  **中文**（`jrh.zh-pinyin`，每切片独立成句、单切片资产以切片文件命名，
+  `jrh/importers/mfa_zh.py` 按 DJUTAU 实测校准）。原版 oto.ini 条目五参数
+  原样存入 Unit timing、组序写入 candidate_groups 人工排序。
+- `jrh combine <project> [--dry-run] [--config <json>]`：母版侧自动拼字（仅中文）：
+  缺失集合 = 410 − 母版已有 label；presamp 短 ID 分组选源（组内 rank0 + 跨 label
+  统计；模糊近似回退 sh~s/zh~z/ch~c/l~n~r/f~h 与前鼻/后鼻，报告标注）；
+  crossfade 合成（RMS + S-curve，`jrh/audio/combine.py`）；每音节一个
+  Asset + Sentence + Unit（`assets/C{音节}.wav`）；冻结项目拒绝。
+- `jrh export-vc <project> --out <dir>`：仅对 henki 导入的母版可用；输出
+  「原版 oto.ini 逐字节 + VC/派生 CV 追加行 + 原版 wav 拷贝 + 句 wav」；
+  中文母版另交付 presamp.ini（内置标准模板逐字节）。
+  **体感无差别保证**（不用 VC 与原版完全一致，追加行是纯增量，别名含空格永不冲突）。
+- 中文 VC 别名 = presamp 短 ID，表 = `jrh/languages/presamp.py` 内置标准 presamp.ini
+  （单一事实来源：交付文件、`vc_vowel`/`vc_consonant`、OpenUtau 内置 zh-cvv 三处同源）。
+- 整资产句「定向已有文件」：句 WAV 文件名 = 资产文件名，原样复制不重复转码
+  （henki 单切片句与拼字句命中；多切片句仍写 sentence_NNN.wav）。
+- 真实交付物样例：`E:\Singer\ShiQi17.jrh`（日语母版）与
+  `E:\Singer\ShiQi17_CVVC`（日语补充音源）。
 
 ### 测试布局
 `tests/unit|integration|acceptance|golden|negative|property|regression`；

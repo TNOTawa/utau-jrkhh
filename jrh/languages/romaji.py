@@ -249,5 +249,25 @@ class RomajiPack:
             return None  # 纯元音 / 全辅音（如ん 的 "n"）没有起音辅音
         return unit[:i]
 
+    def is_helper(self, unit: str) -> bool:
+        """小假名辅助拍（っ/ゃ/ゅ/ょ/ぁ…）在罗马音中映射为 x 前缀单位。"""
+        return bool(unit) and unit.startswith("x")
+
+    def vc_vowel(self, unit: str) -> str | None:
+        if self.is_helper(unit):
+            return None  # 辅助拍无真实元音（如 xtsu 末字母 u 是罗马化记号）
+        return self.final_vowel(unit)
+
+    def vc_consonant(self, unit: str) -> str | None:
+        if self.is_helper(unit):
+            return None
+        cons = self.initial_consonant(unit)
+        if cons is not None:
+            return cons
+        # 全辅音拍（ん 的 "n"）：整体作 C 侧（日语 CVVC 惯例，如 "a n"）
+        if unit and self.final_vowel(unit) is None:
+            return unit
+        return None
+
     def substitutes(self, unit: str) -> list[str]:
         return []

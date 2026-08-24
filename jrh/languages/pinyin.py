@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from ..core.errors import InvalidInputError
+from .presamp import consonant_id_of, vowel_id_of
 
 PACK_NAME = "jrh.zh-pinyin"
 UNIT_SYSTEM = "pinyin-toneless"
@@ -534,6 +535,11 @@ _CJK_RE = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
 _MAX_UNIT_LEN = 6  # 最长音节 zhuang
 
 
+def all_units() -> frozenset[str]:
+    """语言包全部合法录音单位（410 音节；供拼字缺失集合等整表遍历）。"""
+    return _SYLLABLES
+
+
 class PinyinPack:
     name = PACK_NAME
     unit_system = UNIT_SYSTEM
@@ -616,6 +622,27 @@ class PinyinPack:
             if unit.startswith(init) and len(unit) > len(init):
                 return init
         return None
+
+    def is_helper(self, unit: str) -> bool:
+        return False
+
+    def vc_vowel(self, unit: str) -> str | None:
+        """CVVC VC 元音侧 ID = presamp 韵母短 ID（an/ang/ir/i0/e0/vn…）。
+
+        与交付的 presamp.ini 同源（presamp.vowel_id_of），保证与 OpenUtau 内置
+        zh-cvv 音素器（读同一份 [VOWEL] 表）请求的别名一致；未枚举音节返回 None
+        （VC 不生成，见 JRH_SPEC §5）。注意与 final_vowel（韵母近似，丢 n/ng 韵尾）
+        语义不同，两者各有用途。
+        """
+        return vowel_id_of(unit)
+
+    def vc_consonant(self, unit: str) -> str | None:
+        """CVVC VC 辅音侧 ID = presamp 声母短 ID（含 ly/xy/hw/ny/… 组合声母、y/w）。
+
+        与 initial_consonant（普通声母拆分）不同：li→ly、hua→hw、xue→xw 等。
+        零声母/未枚举返回 None。
+        """
+        return consonant_id_of(unit)
 
     def substitutes(self, unit: str) -> list[str]:
         """近似替代：同韵母（同韵腹）的不同音节，按字典序。"""

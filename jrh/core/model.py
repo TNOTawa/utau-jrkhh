@@ -180,6 +180,41 @@ class Timing:
             overlap=0.0,
         )
 
+    def vc_timing(
+        self, next_timing: Timing, offset_ratio: float, overlap_ratio: float
+    ) -> Timing | None:
+        """CVVC 的 VC 过渡片段：[当前元音后半, 下一单元元音起点)。
+
+        - 区域 = [当前窗口末端 - 元音时长×offset_ratio, 下一单元 offset+consonant)
+          （元音尾 + 下一辅音整段，不延伸到下一单元元音内部——修正参考实现的宽窗口）
+        - consonant = 下一元音起点相对本 offset 的位置（= 区域全长）
+        - preutterance = 元音/辅音边界相对 offset 的位置
+        - 下一单元辅音不存在（consonant<=0）、元音区为空、
+          或区域非正/不足以容纳 preutterance（标注重叠）时返回 None（不生成）。
+        """
+        if not (0.0 <= offset_ratio <= 1.0 and 0.0 <= overlap_ratio <= 1.0):
+            raise InvalidInputError(
+                "VC 比例参数必须在 [0,1]："
+                f"offset_ratio={offset_ratio}, overlap_ratio={overlap_ratio}"
+            )
+        vowel_dur = self.window_duration() - self.consonant
+        if vowel_dur <= 0:
+            return None  # 元音区为空（如 consonant == |cutoff| 的异常标注）
+        if next_timing.consonant <= 0:
+            return None  # 下一单元无辅音区，不存在元音→辅音过渡
+        pre = vowel_dur * offset_ratio
+        offset = self.window_end() - pre
+        window = next_timing.offset + next_timing.consonant - offset
+        if window <= 0 or pre > window:
+            return None  # 区域非正 / 不足（单元窗口重叠等异常标注）
+        return Timing(
+            offset=offset,
+            consonant=window,
+            cutoff=-window,
+            preutterance=pre,
+            overlap=pre * overlap_ratio,
+        )
+
     def constraint_errors(self, what: str = "timing") -> list[str]:
         """有效性约束（JRH_SPEC §4.5）。返回错误描述列表。"""
         errs: list[str] = []

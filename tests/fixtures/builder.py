@@ -161,3 +161,89 @@ def build_demo_project(
     if freeze:
         proj.freeze()
     return proj_path
+
+
+# ── 日语 CVVC 演示项目（44100 Hz）────────────────────────────────
+# 覆盖：促音借位+去重（あって → a t）、ん（o n）、编号（a t / a t1）、
+#       零声母不生成（おえ）、句尾不生成。
+JA_S1_UNITS = [
+    ("a", Timing(0.0, 0.0, -20000.0, 0.0, 0.0)),
+    ("xtsu", Timing(20000.0, 10000.0, -10000.0, 0.0, 0.0)),
+    ("te", Timing(30000.0, 8000.0, -22000.0, 2000.0, 2000.0)),
+]
+JA_S2_UNITS = [
+    ("ko", Timing(0.0, 6000.0, -24000.0, 2000.0, 2000.0)),
+    ("n", Timing(24000.0, 14000.0, -14000.0, 0.0, 0.0)),
+    ("ni", Timing(38000.0, 7000.0, -22000.0, 2000.0, 2000.0)),
+    ("chi", Timing(60000.0, 6000.0, -14000.0, 1000.0, 1000.0)),
+    ("ha", Timing(74000.0, 6000.0, -16000.0, 2000.0, 2000.0)),
+]
+JA_S3_UNITS = [
+    ("ka", Timing(0.0, 6000.0, -24000.0, 2000.0, 2000.0)),
+    ("ka", Timing(24000.0, 6000.0, -24000.0, 2000.0, 2000.0)),
+]
+JA_S4_UNITS = [
+    ("ka", Timing(0.0, 6000.0, -24000.0, 2000.0, 2000.0)),
+    ("te", Timing(24000.0, 8000.0, -24000.0, 2000.0, 2000.0)),
+]
+JA_S5_UNITS = [
+    ("o", Timing(0.0, 0.0, -15000.0, 0.0, 0.0)),
+    ("e", Timing(15000.0, 0.0, -15000.0, 0.0, 0.0)),
+]
+JA_SENTENCES = [
+    (0, 60000, JA_S1_UNITS),  # あって
+    (0, 90000, JA_S2_UNITS),  # こんにちは
+    (0, 50000, JA_S3_UNITS),  # かか
+    (0, 50000, JA_S4_UNITS),  # かて
+    (0, 30000, JA_S5_UNITS),  # おえ
+]
+
+
+def build_ja_demo_project(root: Path, with_audio: bool = True, freeze: bool = False) -> Path:
+    """构造日语演示项目（jrh.ja-romaji），返回项目路径。"""
+    root = Path(root)
+    proj_path = root / "ja-demo.jrh"
+    proj = JRHProject.create(proj_path, "jrh.ja-romaji")
+
+    assets_dir = proj_path / "assets"
+    wav = write_sine_wav(assets_dir / "ja_src.wav", 44100, 5.0)
+
+    if with_audio:
+        import hashlib
+
+        from jrh.audio.probe import probe_audio_file
+
+        info = probe_audio_file(wav)
+        proj.add_asset(
+            Asset(
+                id="asset-001",
+                file=str(wav.relative_to(proj_path)).replace("\\", "/"),
+                kind="audio",
+                sha256=hashlib.sha256(wav.read_bytes()).hexdigest(),
+                sample_rate=int(info["sample_rate"]),
+                num_samples=int(info["num_samples"]),
+                duration_seconds=float(info["duration_seconds"]),
+            )
+        )
+    else:
+        proj.add_asset(
+            Asset(
+                id="asset-001",
+                file="assets/__missing.wav",
+                kind="audio",
+                sha256="0" * 64,
+                sample_rate=44100,
+                num_samples=220500,
+                duration_seconds=5.0,
+            )
+        )
+
+    for start, end, units in JA_SENTENCES:
+        sent = proj.create_sentence("asset-001", start, end)
+        for label, timing in units:
+            proj.create_unit(sent.sentence_id, label, timing)
+
+    proj.save()
+    if freeze:
+        proj.freeze()
+    return proj_path

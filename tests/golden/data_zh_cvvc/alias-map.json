@@ -335,6 +335,34 @@
     "unit_id": 3,
     "wav": "sentence_001.wav"
   },
+  "ao j": {
+    "kind": "vc",
+    "params": {
+      "consonant": 350.0,
+      "cutoff": -350.0,
+      "offset": 450.0,
+      "overlap": 100.0,
+      "preutterance": 200.0
+    },
+    "sentence_id": 3,
+    "source_label": "jiu",
+    "unit_id": 2,
+    "wav": "src2.wav"
+  },
+  "ao m": {
+    "kind": "vc",
+    "params": {
+      "consonant": 125.0,
+      "cutoff": -125.0,
+      "offset": 875.0,
+      "overlap": 37.5,
+      "preutterance": 75.0
+    },
+    "sentence_id": 2,
+    "source_label": "ma",
+    "unit_id": 3,
+    "wav": "sentence_002.wav"
+  },
   "hao": {
     "kind": "cv",
     "params": {
@@ -377,6 +405,20 @@
     "unit_id": 2,
     "wav": "sentence_002.wav"
   },
+  "i h": {
+    "kind": "vc",
+    "params": {
+      "consonant": 475.0,
+      "cutoff": -475.0,
+      "offset": 575.0,
+      "overlap": 137.5,
+      "preutterance": 275.0
+    },
+    "sentence_id": 1,
+    "source_label": "hao",
+    "unit_id": 2,
+    "wav": "sentence_001.wav"
+  },
   "jiu": {
     "kind": "cv",
     "params": {
@@ -418,6 +460,20 @@
     "source_label": "ni",
     "unit_id": 1,
     "wav": "sentence_001.wav"
+  },
+  "o h": {
+    "kind": "vc",
+    "params": {
+      "consonant": 325.0,
+      "cutoff": -325.0,
+      "offset": 475.0,
+      "overlap": 87.5,
+      "preutterance": 175.0
+    },
+    "sentence_id": 2,
+    "source_label": "hao",
+    "unit_id": 2,
+    "wav": "sentence_002.wav"
   },
   "wo": {
     "kind": "cv",

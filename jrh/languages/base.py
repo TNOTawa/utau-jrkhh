@@ -20,6 +20,15 @@ class LanguagePack(Protocol):
     def initial_consonant(self, unit: str) -> str | None:
         """起音辅音；纯元音返回 None。"""
 
+    def is_helper(self, unit: str) -> bool:
+        """CVVC VC 生成中的透明辅助拍（如日语小假名 っ/ゃ 等），默认 False。"""
+
+    def vc_vowel(self, unit: str) -> str | None:
+        """CVVC VC 的元音侧 ID（VC 别名左段）；无则返回 None。默认 = final_vowel。"""
+
+    def vc_consonant(self, unit: str) -> str | None:
+        """CVVC VC 的辅音侧 ID（VC 别名右段）；无则返回 None。默认 = initial_consonant。"""
+
     def substitutes(self, unit: str) -> list[str]:
         """语言包允许的有序近似替代单位（无则空列表）。"""
 

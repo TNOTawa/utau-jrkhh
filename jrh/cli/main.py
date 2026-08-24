@@ -219,6 +219,31 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true", help="只计算并输出报告，不写任何文件")
     sp.add_argument("--clean", action="store_true", help="先删除旧产物再重建")
     sp.add_argument("--gap", type=float, default=100.0, help="连续性最大时间间隔 ms（默认 100）")
+    sp.add_argument(
+        "--cvvc",
+        action="store_true",
+        help="CVVC：额外生成 VC 元音→辅音衔接别名（“元音 辅音”空格分隔）",
+    )
+
+    # ── import-henki / export-vc ────────────────────────────
+    sp = cmd("import-henki", "导入人力V助手 bank（slices+TextGrid）为 JRH 母版", _cmd_import_henki)
+    sp.add_argument("bank", help="人力V助手 bank 目录（含 meta.json/slices/textgrid）")
+    sp.add_argument("--out", required=True, help="输出 JRH 项目目录（须不存在或为空）")
+    sp.add_argument("--oto", default=None, help="现有传统音源 oto.ini（原参数与组内优先级来源）")
+    sp.add_argument("--dry-run", action="store_true", help="只解析并输出报告，不写任何文件")
+    sp = cmd("export-vc", "从 henki 导入的母版导出 CVVC 补充（原版逐行 + VC 追加）", _cmd_export_vc)
+    _add_project_arg(sp)
+    sp.add_argument("--out", required=True, help="输出音源目录")
+
+    # ── combine（母版侧自动拼字） ─────────────────────────────
+    sp = cmd("combine", "母版侧自动拼字：补全缺失 CV 音节（crossfade 合成，中文）", _cmd_combine)
+    _add_project_arg(sp)
+    sp.add_argument("--dry-run", action="store_true", help="只计算并输出计划，不写任何文件")
+    sp.add_argument(
+        "--config",
+        default=None,
+        help='源覆盖/跳过配置 JSON（{"sources": {音节: {consonant: 坐标, vowel: 坐标}}, "skip": [音节]}）',
+    )
 
     # ── select / phonemize ──────────────────────────────────
     sp = cmd("select", "候选选择（逐单位输出层级与解释）", _cmd_select)
@@ -630,7 +655,11 @@ def _cmd_freeze(args) -> int:
 
 def _cmd_compile(args) -> int:
     proj = _load(args.project)
-    config = CompileConfig(continuity_max_gap_ms=args.gap, dry_run=args.dry_run)
+    config = CompileConfig(
+        continuity_max_gap_ms=args.gap,
+        dry_run=args.dry_run,
+        cvvc=args.cvvc,
+    )
     result = compile_project(proj, config)
     if not args.dry_run:
         out = Path(args.out) if args.out else proj.path / "builds" / config.target
@@ -646,10 +675,11 @@ def _cmd_compile(args) -> int:
         _emit(args, report)
     else:
         s = report["summary"]
+        vc_part = f" / VC {s['vc']}" if "vc" in s else ""
         _emit(
             args,
             f"编译完成：{s['aliases_total']} 条别名"
-            f"（FULL {s['full']} / $T {s['transition']} / $B {s['body']} / CV {s['cv']}），"
+            f"（FULL {s['full']} / $T {s['transition']} / $B {s['body']} / CV {s['cv']}{vc_part}），"
             f"冲突 {s['conflicts']}，缺音 {s['missing']}"
             + (
                 f"\n输出: {report['output_dir']}"
@@ -662,6 +692,57 @@ def _cmd_compile(args) -> int:
 
 def _cmd_select(args) -> int:
     return _selection(args, phonemize=False)
+
+
+def _cmd_import_henki(args) -> int:
+    from ..importers.henki import import_henki_bank
+
+    report = import_henki_bank(args.bank, args.out, oto_ini=args.oto, dry_run=args.dry_run)
+    if args.format == "json":
+        _emit(args, report)
+    else:
+        _emit(
+            args,
+            f"导入{'（dry-run，未写文件）' if args.dry_run else '完成'}:"
+            f" {report['segments']} 段 / {report['slices_used']} 切片 /"
+            f" {report['units_total']} 单元 / 匹配条目 {report['matched_entries']}/{report['entries_total']}"
+            + (f"\n输出: {report['output']}" if report["output"] else ""),
+        )
+    return 0
+
+
+def _cmd_export_vc(args) -> int:
+    from ..exporters.vc_supplement import export_vc_supplement
+
+    proj = _load(args.project)
+    report = export_vc_supplement(proj, args.out)
+    if args.format == "json":
+        _emit(args, report)
+    else:
+        _emit(
+            args,
+            f"VC 补充导出完成: 原版条目 {report['original_entries']} 逐行保留 +"
+            f" VC {report['vc_entries']} 条 + 派生 CV {report['appended_cv_entries']} 条"
+            f"{' + presamp.ini' if report['presamp_ini'] else ''}\n输出: {report['output']}",
+        )
+    return 0
+
+
+def _cmd_combine(args) -> int:
+    from ..combine import combine_phonemes
+
+    proj = _load(args.project)
+    report = combine_phonemes(proj, config_path=args.config, dry_run=args.dry_run)
+    if args.format == "json":
+        _emit(args, report)
+    else:
+        _emit(
+            args,
+            f"拼字{'（dry-run，未写文件）' if args.dry_run else '完成'}:"
+            f" 合成 {len(report['combined'])} / 跳过 {len(report['skipped'])}"
+            f"（缺失 {report['missing_total']}）",
+        )
+    return 0
 
 
 def _cmd_phonemize(args) -> int:

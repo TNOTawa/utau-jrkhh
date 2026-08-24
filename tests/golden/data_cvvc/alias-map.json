@@ -1,0 +1,828 @@
+{
+  "1-1-R-a-xtsu": {
+    "kind": "full",
+    "params": {
+      "consonant": 0.0,
+      "cutoff": -453.515,
+      "offset": 0.0,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 1,
+    "source_label": "a",
+    "unit_id": 1,
+    "wav": "sentence_001.wav"
+  },
+  "1-1-R-a-xtsu$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 0.0,
+      "cutoff": -453.515,
+      "offset": 0.0,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 1,
+    "source_label": "a",
+    "unit_id": 1,
+    "wav": "sentence_001.wav"
+  },
+  "1-2-a-xtsu-te": {
+    "kind": "full",
+    "params": {
+      "consonant": 226.757,
+      "cutoff": -226.757,
+      "offset": 453.515,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 1,
+    "source_label": "xtsu",
+    "unit_id": 2,
+    "wav": "sentence_001.wav"
+  },
+  "1-2-a-xtsu-te$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 226.757,
+      "cutoff": -226.757,
+      "offset": 453.515,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 1,
+    "source_label": "xtsu",
+    "unit_id": 2,
+    "wav": "sentence_001.wav"
+  },
+  "1-2-a-xtsu-te$T": {
+    "kind": "transition",
+    "params": {
+      "consonant": 226.757,
+      "cutoff": -226.757,
+      "offset": 453.515,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 1,
+    "source_label": "xtsu",
+    "unit_id": 2,
+    "wav": "sentence_001.wav"
+  },
+  "1-3-xtsu-te-R": {
+    "kind": "full",
+    "params": {
+      "consonant": 181.406,
+      "cutoff": -498.866,
+      "offset": 680.272,
+      "overlap": 45.351,
+      "preutterance": 45.351
+    },
+    "sentence_id": 1,
+    "source_label": "te",
+    "unit_id": 3,
+    "wav": "sentence_001.wav"
+  },
+  "1-3-xtsu-te-R$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -453.515,
+      "offset": 725.624,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 1,
+    "source_label": "te",
+    "unit_id": 3,
+    "wav": "sentence_001.wav"
+  },
+  "1-3-xtsu-te-R$T": {
+    "kind": "transition",
+    "params": {
+      "consonant": 181.406,
+      "cutoff": -181.406,
+      "offset": 680.272,
+      "overlap": 45.351,
+      "preutterance": 0.0
+    },
+    "sentence_id": 1,
+    "source_label": "te",
+    "unit_id": 3,
+    "wav": "sentence_001.wav"
+  },
+  "2-1-R-ko-n": {
+    "kind": "full",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -544.218,
+      "offset": 0.0,
+      "overlap": 45.351,
+      "preutterance": 45.351
+    },
+    "sentence_id": 2,
+    "source_label": "ko",
+    "unit_id": 1,
+    "wav": "sentence_002.wav"
+  },
+  "2-1-R-ko-n$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 90.703,
+      "cutoff": -498.866,
+      "offset": 45.351,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "ko",
+    "unit_id": 1,
+    "wav": "sentence_002.wav"
+  },
+  "2-1-R-ko-n$T": {
+    "kind": "transition",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -136.054,
+      "offset": 0.0,
+      "overlap": 45.351,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "ko",
+    "unit_id": 1,
+    "wav": "sentence_002.wav"
+  },
+  "2-2-ko-n-ni": {
+    "kind": "full",
+    "params": {
+      "consonant": 317.46,
+      "cutoff": -317.46,
+      "offset": 544.218,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "n",
+    "unit_id": 2,
+    "wav": "sentence_002.wav"
+  },
+  "2-2-ko-n-ni$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 317.46,
+      "cutoff": -317.46,
+      "offset": 544.218,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "n",
+    "unit_id": 2,
+    "wav": "sentence_002.wav"
+  },
+  "2-2-ko-n-ni$T": {
+    "kind": "transition",
+    "params": {
+      "consonant": 317.46,
+      "cutoff": -317.46,
+      "offset": 544.218,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "n",
+    "unit_id": 2,
+    "wav": "sentence_002.wav"
+  },
+  "2-3-n-ni-chi": {
+    "kind": "full",
+    "params": {
+      "consonant": 158.73,
+      "cutoff": -498.866,
+      "offset": 861.678,
+      "overlap": 45.351,
+      "preutterance": 45.351
+    },
+    "sentence_id": 2,
+    "source_label": "ni",
+    "unit_id": 3,
+    "wav": "sentence_002.wav"
+  },
+  "2-3-n-ni-chi$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 113.379,
+      "cutoff": -453.515,
+      "offset": 907.029,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "ni",
+    "unit_id": 3,
+    "wav": "sentence_002.wav"
+  },
+  "2-3-n-ni-chi$T": {
+    "kind": "transition",
+    "params": {
+      "consonant": 158.73,
+      "cutoff": -158.73,
+      "offset": 861.678,
+      "overlap": 45.351,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "ni",
+    "unit_id": 3,
+    "wav": "sentence_002.wav"
+  },
+  "2-4-ni-chi-ha": {
+    "kind": "full",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -317.46,
+      "offset": 1360.544,
+      "overlap": 22.676,
+      "preutterance": 22.676
+    },
+    "sentence_id": 2,
+    "source_label": "chi",
+    "unit_id": 4,
+    "wav": "sentence_002.wav"
+  },
+  "2-4-ni-chi-ha$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 113.379,
+      "cutoff": -294.785,
+      "offset": 1383.22,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "chi",
+    "unit_id": 4,
+    "wav": "sentence_002.wav"
+  },
+  "2-4-ni-chi-ha$T": {
+    "kind": "transition",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -136.054,
+      "offset": 1360.544,
+      "overlap": 22.676,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "chi",
+    "unit_id": 4,
+    "wav": "sentence_002.wav"
+  },
+  "2-5-chi-ha-R": {
+    "kind": "full",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -362.812,
+      "offset": 1678.005,
+      "overlap": 45.351,
+      "preutterance": 45.351
+    },
+    "sentence_id": 2,
+    "source_label": "ha",
+    "unit_id": 5,
+    "wav": "sentence_002.wav"
+  },
+  "2-5-chi-ha-R$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 90.703,
+      "cutoff": -317.46,
+      "offset": 1723.356,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "ha",
+    "unit_id": 5,
+    "wav": "sentence_002.wav"
+  },
+  "2-5-chi-ha-R$T": {
+    "kind": "transition",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -136.054,
+      "offset": 1678.005,
+      "overlap": 45.351,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "ha",
+    "unit_id": 5,
+    "wav": "sentence_002.wav"
+  },
+  "3-1-R-ka-ka": {
+    "kind": "full",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -544.218,
+      "offset": 0.0,
+      "overlap": 45.351,
+      "preutterance": 45.351
+    },
+    "sentence_id": 3,
+    "source_label": "ka",
+    "unit_id": 1,
+    "wav": "sentence_003.wav"
+  },
+  "3-1-R-ka-ka$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 90.703,
+      "cutoff": -498.866,
+      "offset": 45.351,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 3,
+    "source_label": "ka",
+    "unit_id": 1,
+    "wav": "sentence_003.wav"
+  },
+  "3-1-R-ka-ka$T": {
+    "kind": "transition",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -136.054,
+      "offset": 0.0,
+      "overlap": 45.351,
+      "preutterance": 0.0
+    },
+    "sentence_id": 3,
+    "source_label": "ka",
+    "unit_id": 1,
+    "wav": "sentence_003.wav"
+  },
+  "3-2-ka-ka-R": {
+    "kind": "full",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -544.218,
+      "offset": 544.218,
+      "overlap": 45.351,
+      "preutterance": 45.351
+    },
+    "sentence_id": 3,
+    "source_label": "ka",
+    "unit_id": 2,
+    "wav": "sentence_003.wav"
+  },
+  "3-2-ka-ka-R$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 90.703,
+      "cutoff": -498.866,
+      "offset": 589.569,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 3,
+    "source_label": "ka",
+    "unit_id": 2,
+    "wav": "sentence_003.wav"
+  },
+  "3-2-ka-ka-R$T": {
+    "kind": "transition",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -136.054,
+      "offset": 544.218,
+      "overlap": 45.351,
+      "preutterance": 0.0
+    },
+    "sentence_id": 3,
+    "source_label": "ka",
+    "unit_id": 2,
+    "wav": "sentence_003.wav"
+  },
+  "4-1-R-ka-te": {
+    "kind": "full",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -544.218,
+      "offset": 0.0,
+      "overlap": 45.351,
+      "preutterance": 45.351
+    },
+    "sentence_id": 4,
+    "source_label": "ka",
+    "unit_id": 1,
+    "wav": "sentence_004.wav"
+  },
+  "4-1-R-ka-te$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 90.703,
+      "cutoff": -498.866,
+      "offset": 45.351,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 4,
+    "source_label": "ka",
+    "unit_id": 1,
+    "wav": "sentence_004.wav"
+  },
+  "4-1-R-ka-te$T": {
+    "kind": "transition",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -136.054,
+      "offset": 0.0,
+      "overlap": 45.351,
+      "preutterance": 0.0
+    },
+    "sentence_id": 4,
+    "source_label": "ka",
+    "unit_id": 1,
+    "wav": "sentence_004.wav"
+  },
+  "4-2-ka-te-R": {
+    "kind": "full",
+    "params": {
+      "consonant": 181.406,
+      "cutoff": -544.218,
+      "offset": 544.218,
+      "overlap": 45.351,
+      "preutterance": 45.351
+    },
+    "sentence_id": 4,
+    "source_label": "te",
+    "unit_id": 2,
+    "wav": "sentence_004.wav"
+  },
+  "4-2-ka-te-R$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -498.866,
+      "offset": 589.569,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 4,
+    "source_label": "te",
+    "unit_id": 2,
+    "wav": "sentence_004.wav"
+  },
+  "4-2-ka-te-R$T": {
+    "kind": "transition",
+    "params": {
+      "consonant": 181.406,
+      "cutoff": -181.406,
+      "offset": 544.218,
+      "overlap": 45.351,
+      "preutterance": 0.0
+    },
+    "sentence_id": 4,
+    "source_label": "te",
+    "unit_id": 2,
+    "wav": "sentence_004.wav"
+  },
+  "5-1-R-o-e": {
+    "kind": "full",
+    "params": {
+      "consonant": 0.0,
+      "cutoff": -340.136,
+      "offset": 0.0,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 5,
+    "source_label": "o",
+    "unit_id": 1,
+    "wav": "sentence_005.wav"
+  },
+  "5-1-R-o-e$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 0.0,
+      "cutoff": -340.136,
+      "offset": 0.0,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 5,
+    "source_label": "o",
+    "unit_id": 1,
+    "wav": "sentence_005.wav"
+  },
+  "5-2-o-e-R": {
+    "kind": "full",
+    "params": {
+      "consonant": 0.0,
+      "cutoff": -340.136,
+      "offset": 340.136,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 5,
+    "source_label": "e",
+    "unit_id": 2,
+    "wav": "sentence_005.wav"
+  },
+  "5-2-o-e-R$B": {
+    "kind": "body",
+    "params": {
+      "consonant": 0.0,
+      "cutoff": -340.136,
+      "offset": 340.136,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 5,
+    "source_label": "e",
+    "unit_id": 2,
+    "wav": "sentence_005.wav"
+  },
+  "a": {
+    "kind": "cv",
+    "params": {
+      "consonant": 0.0,
+      "cutoff": -453.515,
+      "offset": 0.0,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 1,
+    "source_label": "a",
+    "unit_id": 1,
+    "wav": "sentence_001.wav"
+  },
+  "a k": {
+    "kind": "vc",
+    "params": {
+      "consonant": 340.136,
+      "cutoff": -340.136,
+      "offset": 340.136,
+      "overlap": 102.041,
+      "preutterance": 204.082
+    },
+    "sentence_id": 3,
+    "source_label": "ka",
+    "unit_id": 2,
+    "wav": "sentence_003.wav"
+  },
+  "a t": {
+    "kind": "vc",
+    "params": {
+      "consonant": 634.921,
+      "cutoff": -634.921,
+      "offset": 226.757,
+      "overlap": 113.379,
+      "preutterance": 226.757
+    },
+    "sentence_id": 1,
+    "source_label": "te",
+    "unit_id": 3,
+    "wav": "sentence_001.wav"
+  },
+  "a t1": {
+    "kind": "vc",
+    "params": {
+      "consonant": 385.488,
+      "cutoff": -385.488,
+      "offset": 340.136,
+      "overlap": 102.041,
+      "preutterance": 204.082
+    },
+    "sentence_id": 4,
+    "source_label": "te",
+    "unit_id": 2,
+    "wav": "sentence_004.wav"
+  },
+  "chi": {
+    "kind": "cv",
+    "params": {
+      "consonant": 113.379,
+      "cutoff": -294.785,
+      "offset": 1383.22,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "chi",
+    "unit_id": 4,
+    "wav": "sentence_002.wav"
+  },
+  "e": {
+    "kind": "cv",
+    "params": {
+      "consonant": 0.0,
+      "cutoff": -340.136,
+      "offset": 340.136,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 5,
+    "source_label": "e",
+    "unit_id": 2,
+    "wav": "sentence_005.wav"
+  },
+  "ha": {
+    "kind": "cv",
+    "params": {
+      "consonant": 90.703,
+      "cutoff": -317.46,
+      "offset": 1723.356,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "ha",
+    "unit_id": 5,
+    "wav": "sentence_002.wav"
+  },
+  "i ch": {
+    "kind": "vc",
+    "params": {
+      "consonant": 306.122,
+      "cutoff": -306.122,
+      "offset": 1190.476,
+      "overlap": 85.034,
+      "preutterance": 170.068
+    },
+    "sentence_id": 2,
+    "source_label": "chi",
+    "unit_id": 4,
+    "wav": "sentence_002.wav"
+  },
+  "i h": {
+    "kind": "vc",
+    "params": {
+      "consonant": 226.757,
+      "cutoff": -226.757,
+      "offset": 1587.302,
+      "overlap": 45.351,
+      "preutterance": 90.703
+    },
+    "sentence_id": 2,
+    "source_label": "ha",
+    "unit_id": 5,
+    "wav": "sentence_002.wav"
+  },
+  "ka": {
+    "kind": "cv",
+    "params": {
+      "consonant": 90.703,
+      "cutoff": -498.866,
+      "offset": 45.351,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 3,
+    "source_label": "ka",
+    "unit_id": 1,
+    "wav": "sentence_003.wav"
+  },
+  "ka1": {
+    "kind": "cv",
+    "params": {
+      "consonant": 90.703,
+      "cutoff": -498.866,
+      "offset": 589.569,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 3,
+    "source_label": "ka",
+    "unit_id": 2,
+    "wav": "sentence_003.wav"
+  },
+  "ka2": {
+    "kind": "cv",
+    "params": {
+      "consonant": 90.703,
+      "cutoff": -498.866,
+      "offset": 45.351,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 4,
+    "source_label": "ka",
+    "unit_id": 1,
+    "wav": "sentence_004.wav"
+  },
+  "ko": {
+    "kind": "cv",
+    "params": {
+      "consonant": 90.703,
+      "cutoff": -498.866,
+      "offset": 45.351,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "ko",
+    "unit_id": 1,
+    "wav": "sentence_002.wav"
+  },
+  "n": {
+    "kind": "cv",
+    "params": {
+      "consonant": 317.46,
+      "cutoff": -317.46,
+      "offset": 544.218,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "n",
+    "unit_id": 2,
+    "wav": "sentence_002.wav"
+  },
+  "ni": {
+    "kind": "cv",
+    "params": {
+      "consonant": 113.379,
+      "cutoff": -453.515,
+      "offset": 907.029,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 2,
+    "source_label": "ni",
+    "unit_id": 3,
+    "wav": "sentence_002.wav"
+  },
+  "o": {
+    "kind": "cv",
+    "params": {
+      "consonant": 0.0,
+      "cutoff": -340.136,
+      "offset": 0.0,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 5,
+    "source_label": "o",
+    "unit_id": 1,
+    "wav": "sentence_005.wav"
+  },
+  "o n": {
+    "kind": "vc",
+    "params": {
+      "consonant": 521.542,
+      "cutoff": -521.542,
+      "offset": 340.136,
+      "overlap": 102.041,
+      "preutterance": 204.082
+    },
+    "sentence_id": 2,
+    "source_label": "n",
+    "unit_id": 2,
+    "wav": "sentence_002.wav"
+  },
+  "te": {
+    "kind": "cv",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -453.515,
+      "offset": 725.624,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 1,
+    "source_label": "te",
+    "unit_id": 3,
+    "wav": "sentence_001.wav"
+  },
+  "te1": {
+    "kind": "cv",
+    "params": {
+      "consonant": 136.054,
+      "cutoff": -498.866,
+      "offset": 589.569,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 4,
+    "source_label": "te",
+    "unit_id": 2,
+    "wav": "sentence_004.wav"
+  },
+  "xtsu": {
+    "kind": "cv",
+    "params": {
+      "consonant": 226.757,
+      "cutoff": -226.757,
+      "offset": 453.515,
+      "overlap": 0.0,
+      "preutterance": 0.0
+    },
+    "sentence_id": 1,
+    "source_label": "xtsu",
+    "unit_id": 2,
+    "wav": "sentence_001.wav"
+  }
+}

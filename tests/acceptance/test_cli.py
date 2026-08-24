@@ -218,6 +218,147 @@ class TestCompileCLI:
         r = run_cli("compile", str(full_proj), "--dry-run")
         assert r.returncode == 3
 
+    def test_compile_cvvc_flag(self, tmp_path):
+        from fixtures.builder import build_ja_demo_project
+
+        ja = build_ja_demo_project(tmp_path)
+        r = run_cli("compile", str(ja), "--cvvc")
+        assert r.returncode == 0, r.stderr
+        out = ja / "builds" / "openutau-jrh"
+        oto = (out / "oto.ini").read_text(encoding="utf-8")
+        assert "=a t," in oto
+        assert "=a t1," in oto
+        assert "=o n," in oto
+        report = json.loads((out / "build-report.json").read_text(encoding="utf-8"))
+        assert report["summary"]["vc"] == 6
+        assert report["config"]["cvvc"] is True
+        assert "VC 6" in r.stdout
+
+    def test_compile_cvvc_dry_run_json(self, tmp_path):
+        from fixtures.builder import build_ja_demo_project
+
+        ja = build_ja_demo_project(tmp_path)
+        r = run_cli("--format", "json", "compile", str(ja), "--cvvc", "--dry-run")
+        assert r.returncode == 0, r.stderr
+        data = json_out(r)
+        assert data["summary"]["vc"] == 6
+        vcs = [e for e in data["entries"] if e["kind"] == "vc"]
+        assert [e["alias"] for e in vcs] == ["a t", "o n", "i ch", "i h", "a k", "a t1"]
+        assert all(e["wav"] == f"sentence_{e['sentence_id']:03d}.wav" for e in vcs)
+
+    def test_compile_default_no_vc(self, tmp_path):
+        from fixtures.builder import build_ja_demo_project
+
+        ja = build_ja_demo_project(tmp_path)
+        r = run_cli("compile", str(ja))
+        assert r.returncode == 0, r.stderr
+        out = ja / "builds" / "openutau-jrh"
+        oto = (out / "oto.ini").read_text(encoding="utf-8")
+        assert "=a t," not in oto
+        report = json.loads((out / "build-report.json").read_text(encoding="utf-8"))
+        assert "vc" not in report["summary"]
+
+
+class TestImportExportCLI:
+    def _bank(self, tmp_path):
+        from fixtures.henki_bank import build_henki_bank
+
+        return build_henki_bank(tmp_path)
+
+    def test_import_henki_and_export_vc(self, tmp_path):
+        dirs = self._bank(tmp_path)
+        proj = tmp_path / "p.jrh"
+        r = run_cli(
+            "import-henki",
+            str(dirs["bank_dir"]),
+            "--out",
+            str(proj),
+            "--oto",
+            str(dirs["oto_dir"] / "oto.ini"),
+        )
+        assert r.returncode == 0, r.stderr
+        assert (proj / "manifest.json").exists()
+        assert "6 单元" in r.stdout
+        cvvc = tmp_path / "cvvc"
+        r = run_cli("export-vc", str(proj), "--out", str(cvvc))
+        assert r.returncode == 0, r.stderr
+        orig = (dirs["oto_dir"] / "oto.ini").read_bytes()
+        data = (cvvc / "oto.ini").read_bytes()
+        assert data[: len(orig)] == orig
+        assert "=a t," in data[len(orig) :].decode("ascii")
+
+    def test_import_henki_dry_run_json(self, tmp_path):
+        dirs = self._bank(tmp_path)
+        r = run_cli(
+            "--format",
+            "json",
+            "import-henki",
+            str(dirs["bank_dir"]),
+            "--out",
+            str(tmp_path / "p.jrh"),
+            "--dry-run",
+        )
+        assert r.returncode == 0, r.stderr
+        data = json_out(r)
+        assert data["dry_run"] is True
+        assert data["units_total"] == 6
+        assert not (tmp_path / "p.jrh").exists()
+
+    def test_import_henki_unsupported_language_rejected(self, tmp_path):
+        dirs = self._bank(tmp_path)
+        (dirs["bank_dir"] / "meta.json").write_text('{"language": "korean"}\n', encoding="utf-8")
+        r = run_cli("import-henki", str(dirs["bank_dir"]), "--out", str(tmp_path / "p.jrh"))
+        assert r.returncode == 1
+        assert "不支持的语言" in r.stderr
+
+    def test_import_henki_chinese(self, tmp_path):
+        from fixtures.henki_bank_zh import build_henki_bank_zh
+
+        dirs = build_henki_bank_zh(tmp_path)
+        proj = tmp_path / "p.jrh"
+        r = run_cli(
+            "import-henki",
+            str(dirs["bank_dir"]),
+            "--out",
+            str(proj),
+            "--oto",
+            str(dirs["oto_dir"] / "oto.ini"),
+        )
+        assert r.returncode == 0, r.stderr
+        assert "8 单元" in r.stdout
+        r = run_cli("--format", "json", "info", str(proj))
+        data = json_out(r)
+        assert data["language_pack"] == "jrh.zh-pinyin"
+
+    def test_export_vc_requires_henki_project(self, tmp_path):
+        from fixtures.builder import build_demo_project
+
+        proj = build_demo_project(tmp_path)
+        r = run_cli("export-vc", str(proj), "--out", str(tmp_path / "cvvc"))
+        assert r.returncode == 1
+
+
+class TestCombineCLI:
+    def _project(self, tmp_path):
+        from tests.unit.test_combine import _make_project  # noqa: PLC0415
+
+        return _make_project(tmp_path)
+
+    def test_combine_dry_run(self, tmp_path):
+        proj = self._project(tmp_path)
+        r = run_cli("--format", "json", "combine", str(proj), "--dry-run")
+        assert r.returncode == 0, r.stderr
+        data = json_out(r)
+        assert data["dry_run"] is True
+        assert data["missing_total"] == 410 - 6
+
+    def test_combine_full_run(self, tmp_path):
+        proj = self._project(tmp_path)
+        r = run_cli("combine", str(proj))
+        assert r.returncode == 0, r.stderr
+        assert "合成" in r.stdout
+        assert (proj / "combine-report.json").exists()
+
 
 class TestSelectPhonemizeCLI:
     def test_select_json(self, full_proj):

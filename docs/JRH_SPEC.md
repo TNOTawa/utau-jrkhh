@@ -239,7 +239,8 @@ offset ─── offset+overlap ─── offset+preutterance ─── offset+c
 
 ## 5. 编译契约（Compiler Contract）
 
-目标：`openutau-jrh`（v0.1 唯一官方目标；CV/CVVC/VCV 兼容目标为 FUTURE/SHOULD）。
+目标：`openutau-jrh`（v0.1 唯一官方目标；VC 派生已作为可选 CVVC 能力实现，
+完整 CV/CVVC/VCV 兼容目标为 FUTURE/SHOULD）。
 
 ### 5.1 派生规则（唯一权威公式）
 
@@ -272,6 +273,37 @@ overlap_B    = 0
 **CV（简单搜索别名）**：与 `$B` 同一区域、同一参数；命名按候选分组顺序：
 排序第 0 → `label`，第 n → `label{n}`。
 
+**VC（CVVC 元音→辅音过渡，可选）**：仅 `CompileConfig.cvvc=True` 时生成。
+对句内相邻 Unit 对（U = 元音侧，V = 辅音侧）推导一个纯 oto 条目
+（复用句 WAV，不合成、不复制音频），区域为「U 元音后半 + V 辅音整段」，
+止于 V 的元音起点（不延伸进 V 的元音内部）：
+
+```
+vowel_end        = U.window_end()
+vowel_dur        = |U.cutoff| - U.consonant        # U 的元音区
+preutterance_VC  = vowel_dur × vc_offset_ratio     # 默认 0.5
+offset_VC        = vowel_end - preutterance_VC
+next_vowel_start = V.offset + V.consonant
+window           = next_vowel_start - offset_VC
+consonant_VC     = window                          # = 元音尾 + V 辅音整段
+cutoff_VC        = -window
+overlap_VC       = preutterance_VC × vc_overlap_ratio  # 默认 0.5
+```
+
+- 守卫：`vowel_dur ≤ 0`、`V.consonant ≤ 0`、`window ≤ 0`、
+  `preutterance_VC > window`（标注重叠）→ 不生成；
+  ratio ∉ [0,1] → 编译错误。
+- 生成条件：仅句内相邻（`x-` 辅助拍透明借位配对、按归一化坐标对去重；
+  只穿过启用的辅助拍）；U 有 `vc_vowel`、V 有 `vc_consonant`；
+  禁用单元阻断。**不生成**：句尾、跨句、下一 Unit 零声母。
+- 全辅音拍（日语 ん 的 `n`）：`vc_consonant` 返回 unit 本身，生成 `a n`。
+- 中文 VC 别名 = **presamp 短 ID**（`an t`、`ir zh`、`i0 c`、`e0 j`、`vn q`、
+  `i ny`、`a hw` 等），由 `jrh.zh-pinyin` 的 `vc_vowel`/`vc_consonant` 返回；
+  短 ID 表与交付音源的 `presamp.ini` 同源（`jrh/languages/presamp.py` 解析内置
+  标准模板），与 OpenUtau 内置 zh-cvv 音素器（读同一份 `[VOWEL]`/`[CONSONANT]`）
+  永不漂移。presamp 枚举外的音节（如 `yo`）两侧返回 None → 不生成 VC
+  （OpenUtau 侧同样回退，行为一致）。
+
 **不生成**：ENDING / 尾元音释放类别名（句尾直接使用当前字原音尾部）。
 
 ### 5.2 别名命名
@@ -280,17 +312,26 @@ overlap_B    = 0
 
 - `prev/cur/next` 为语言包生成的可读显示单位；句首/句尾使用保留标记 `R`（休止）。
 - 派生后缀：`$T` / `$B`，如 `1-2-ni-hao-a$T`、`1-2-ni-hao-a$B`。
+- VC 别名（CVVC，可选）：`{vc_vowel} {vc_consonant}`，**空格分隔**，
+  如 `a k`、`a t1`；同对多样本按辅音侧 Unit 的有效组序编号
+  （第 0 → base，第 n → base{n}）。
 - 保留标记与派生后缀构成内部命名空间，语言包不得产出含 `$` 的 label。
 - **别名字符集（label 允许字符）**：Unicode 字母、数字及 `@{}#.:_~+<>[]()%`。
   禁止：空白、`,` `=` `;` `"` `'` `\` `-` 及控制字符（validation 强制）。
+  该约束只作用于 **label**；派生别名不在此列（五段式含 `-`，VC 含空格，
+  与 label 派生命名空间天然不相交）。
 
 ### 5.3 输出文件
 
-- **原句 WAV**：每句一个 `sentence_{id:03d}.wav`，内容 = Asset 的 `[start_sample, end_sample)`。
+- **原句 WAV**：句范围覆盖**整个资产**（`start=0` 且 `end=资产长`）时
+  「定向已有文件」——WAV 文件名 = 资产文件名，导出即原样复制资产文件，
+  **不重复转码、不产生内容相同的第二份文件**（henki 导入的单切片句/拼字句
+  天然命中此规则，与音源目录中已有的同源 wav 合并为一份）；
+  其余句子写 `sentence_{id:03d}.wav`，内容 = Asset 的 `[start_sample, end_sample)`。
   所有别名共享同一 WAV，**禁止无意义复制音频**。
 - **oto.ini**：`wav=alias,offset,consonant,cutoff,preutterance,overlap`（毫秒）；
   编码 UTF-8；条目排序：按 `(sentence_id, unit_id, kind)`，
-  `kind` 顺序 = FULL(0) → TRANSITION(1) → BODY(2) → CV(3)。
+  `kind` 顺序 = FULL(0) → TRANSITION(1) → BODY(2) → CV(3) → VC(4，仅 cvvc)。
 - **alias-map.json**：`{alias: {sentence_id, unit_id, kind, wav, params}}`，
   用于编译产物反查 JRH 来源（Source Timeline 不变量）。
 - **build-report.json**（结构化）：
@@ -308,6 +349,10 @@ overlap_B    = 0
   "unrepresentable": []
 }
 ```
+
+> `cvvc=True` 时：`config` 增加 `cvvc`/`vc_offset_ratio`/`vc_overlap_ratio`，
+> `summary` 增加 `vc` 计数；`cvvc=False`（默认）时产物与不含 VC 能力的
+> 历史版本逐字节一致。
 
 - **别名冲突不得静默覆盖**：编译时若两个来源产生相同 alias，必须记录到
   `conflicts` 并**整体编译失败**（错误退出，不产出 oto.ini），由用户解决。
@@ -387,6 +432,9 @@ class LanguagePack:
     def initial_consonant(self, unit: str) -> str | None  # 起音辅音
     def substitutes(self, unit: str) -> list[str]       # 有序近似替代
     def validate_unit(self, unit: str) -> bool          # 是否为合法单位
+    def is_helper(self, unit: str) -> bool              # VC 生成透明辅助拍（默认 False）
+    def vc_vowel(self, unit: str) -> str | None         # VC 别名元音侧 ID（默认 = final_vowel）
+    def vc_consonant(self, unit: str) -> str | None     # VC 别名辅音侧 ID（默认 = initial_consonant）
 ```
 
 v0.1 内置包：
@@ -397,6 +445,16 @@ v0.1 内置包：
 | `jrh.ja-romaji` | Hepburn 罗马音 | 完整假名表（沿用现有 `src/oto_parser.py` 的表）；替代 = 空 |
 
 - `final_vowel("hao") = "ao"`；`initial_consonant("hao") = "h"`；纯元音 `initial = None`。
+- VC 约定（`jrh.ja-romaji`）：`is_helper` = `x` 前缀单位（っ/ゃ 等小假名辅助拍）；
+  `vc_vowel` 对辅助拍返回 None（`xtsu` 的末字母 `u` 是罗马化记号，非元音）；
+  `vc_consonant` 对全辅音拍（ん 的 `n`）返回 unit 本身（日语 CVVC 惯例 `a n`）。
+- VC 约定（`jrh.zh-pinyin`）：`vc_vowel`/`vc_consonant` = presamp 短 ID
+  （`final_vowel`/`initial_consonant` 语义不变——前者是丢 n/ng 韵尾的韵母近似、
+  后者是普通声母拆分，仅供 selection 等使用）。例：`vc_vowel("an")="an"`、
+  `vc_vowel("zhi")="ir"`、`vc_vowel("ye")="e0"`、`vc_vowel("jun")="vn"`、
+  `vc_consonant("li")="ly"`、`vc_consonant("hua")="hw"`、`vc_consonant("xue")="xw"`、
+  `vc_consonant("yu")="v"`；枚举外/零声母返回 None。短 ID 表 = 内置 presamp.ini
+  （`jrh/languages/presamp.py`，交付与映射的单一事实来源）。
 - 语言包自定义后续可通过插件/配置扩展（FUTURE）。
 
 ## 8. 机器辅助（默认离线可用）
@@ -434,3 +492,69 @@ v0.1 内置包：
 
 - `schema_version` 变更需更新 validation 与迁移指南（迁移指南 FUTURE）。
 - 本规范当前版本 `0.1.0`。
+
+## 12. 外部数据导入 / 补充导出（工具链）
+
+### 12.1 人力V助手 bank 导入（`import-henki`）
+
+把人力V助手（JinrikiHelper）格式的 bank（`meta.json` + `slices/*.wav` +
+`textgrid/*.TextGrid`，MFA 音素对齐）转为 JRH 母版。语言按 `meta.language`
+自动分发（japanese/ja → `mfa_ja` + `jrh.ja-romaji`；chinese/zh → `mfa_zh` +
+`jrh.zh-pinyin`；其余拒绝）。
+
+- **日语**：MFA 音素 → 罗马音拍（`mfa_ja.py`：清化元音归位、长音拆两拍、
+  促音独立拍、腭化 y 插入、spn/空文本跳过、孤辅音丢弃并告警）；
+  **同段切片按序号拼接**为一句（Asset = `assets/segment_{seg:03d}.wav`）。
+- **中文**：MFA 普通话（mandarin_china_mfa）音素 → 无声调拼音音节
+  （`mfa_zh.py`，规则按 DJUTAU bank 全量 459 TextGrid 实测校准；声调剥离、
+  介音吸收（tɕ+ow=就 jiu、tɕʷ+e=觉 jue、xʷ+a=花 hua）、腭化/唇化声母虚拟介音、
+  o+ŋ=eng / u+ŋ=ong、裸 o 多音映射、ɲ+y=语 yu、裸 ʐ̩=日 ri、儿化 ɻ/ɚ→er 独立音节、
+  ʔ 作声母兼词首元音边界、ŋ 恒为韵尾、n 韵尾仅接鼻韵母元音且同词）；
+  **每切片独立成句**（DJUTAU 实测：切片按词/停顿切，跨切片无协同发音，
+  不生成跨切片过渡）。
+- **Asset 命名**：单切片组 = 切片文件原样复制（`assets/{stem}.wav`，
+  整资产句「定向已有文件」的基础）；多切片段 = `assets/segment_{seg:03d}.wav`。
+- 缺 TextGrid 的切片：音频仍在句内、其音素不入 Unit；整段无 TextGrid 则跳过。
+- 可选 `--oto 现有音源 oto.ini`：
+  - Unit timing **优先原样保留**原条目五参数（毫秒→采样点；窗口越界/非法退回区间估计）；
+  - 原版组内顺序写入 `candidate_groups` 人工排序（同 label 多组按文件序合并去重）；
+  - 拼字产物（非切片 wav）、VC 行（别名含空格，无语言包单位）等不产生 Unit，
+    逐条列入报告。
+- 无条目时的估计 timing：consonant = 辅音段时长、preutterance = consonant、
+  overlap = 0.3×consonant；中文零声母（无 ʔ）consonant = min(30ms, 元音首音素×0.2)；
+  窗口钳制到切片边界（浮点噪声与 TextGrid 越界统一处理）。
+- 输出 `import-report.json`（确定性）；`--dry-run` 只出报告不写文件。
+
+### 12.2 VC 补充导出（`export-vc`）
+
+从 henki 导入的母版导出「原版 + VC 追加」音源目录，**体感无差别保证**：
+
+- oto.ini = 原版文件**逐字节原样** + 追加行（纯 ASCII；VC 别名含空格、
+  与原版别名命名空间必然不相交——导入/导出均校验）；
+- 追加行 = VC（`compile --cvvc` 派生）+ **派生 CV**（仅对原版中不存在的
+  base 别名追加——拼字 Unit、或人工剥离版剔除的音节自动补齐；绝不与原版重复）；
+- 中文母版另交付 `presamp.ini`（内置标准模板逐字节；OpenUtau 内置 zh-cvv
+  音素器依赖它生成短 ID VC 别名）；
+- 原版引用的 wav 从原版目录原样拷贝；追加行引用母版句 wav（整资产句
+  「定向已有文件」——单切片句的句 wav 即原版同名 wav，零重复）；
+- 不使用 VC 时行为与原版音源完全一致（同一文件字节、同一 wav 字节）。
+
+### 12.3 母版侧自动拼字（`combine`）
+
+`jrh combine <project> [--dry-run] [--config <json>]`：补全缺失 CV 音节
+（仅 `jrh.zh-pinyin`；冻结项目拒绝执行；日语扩展为 TODO）。
+
+- 缺失集合 = 语言包全部音节（410）− 母版已有 label；
+- presamp 短 ID 决定源组：辅音源 = 同声母 ID 的启用 Unit（辅音区非空）、
+  元音源 = 同韵母 ID（元音区非空）；枚举外音节跳过并报告；
+- 选择：同 label 组内有效组序 rank0（= 原版组序第一名）为代表，跨 label 统计
+  ——辅音源取时长最接近中位数、元音源取时长最长（并列取坐标小者，确定性）；
+- 源组完全缺失时模糊回退（sh~s、zh~z、ch~c、l~n~r、f~h；an~ang、en~eng~ong、
+  in~ing），报告逐条标注 fuzzy；`--config` 可覆盖任意音节的源（坐标）或跳过；
+- 合成 = 辅音段 `[offset, offset+consonant)` + 元音段 `[offset+consonant, offset+|cutoff|)`
+  的 crossfade 拼接（RMS 增益 0.5~2.0 + 余弦 S-curve + 2ms 端点 fade，
+  `jrh/audio/combine.py`，惰性导入 numpy/soundfile）；产物 timing：
+  `offset=0`、`consonant=辅音源时长`、`cutoff=-总时长`、`preutterance=辅音源时长`、
+  `overlap=辅音源时长×0.5`；
+- 每音节 = 独立 Asset（`assets/C{音节}.wav`）+ 独立 Sentence + 单 Unit
+  （拼字音节互不连续）；输出 `combine-report.json`；`--dry-run` 只出计划。

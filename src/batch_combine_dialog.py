@@ -259,6 +259,9 @@ class BatchCombineDialog(ctk.CTkToplevel):
             bc, _ = _get_cv_of_base(base)
             if bc in candidates:
                 result.append(base)
+        # 保底回退：找不到任何匹配候选时，开放全部音素供选择
+        if not result:
+            result = [base for base, _ in self._all_groups]
         return result
 
     def _get_vowel_candidate_groups(self, v: str) -> List[str]:
@@ -267,6 +270,9 @@ class BatchCombineDialog(ctk.CTkToplevel):
             _, bv = _get_cv_of_base(base)
             if bv == v:
                 result.append(base)
+        # 保底回退：找不到任何匹配候选时，开放全部音素供选择
+        if not result:
+            result = [base for base, _ in self._all_groups]
         return result
 
     @staticmethod

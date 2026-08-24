@@ -86,6 +86,141 @@ class TestBodyFormula:
         assert b.offset == 66150 and b.cutoff == -17640 and b.consonant == 0
 
 
+class TestVcFormula:
+    """VC 过渡派生公式（JRH_SPEC §5 VC 派生，手工计算值）。"""
+
+    def test_vc_params_mid_vowel(self):
+        u = Timing(0.0, 0.0, -200.0, 0.0, 0.0)  # 元音侧：窗口 [0, 200)
+        v = Timing(210.0, 60.0, -180.0, 0.0, 0.0)  # 辅音侧：元音起点 270
+        vc = u.vc_timing(v, 0.5, 0.5)
+        assert vc.offset == 100.0  # 元音中点（200 - 200*0.5）
+        assert vc.preutterance == 100.0  # 边界位置 = 元音尾
+        assert vc.consonant == 170.0  # 270 - 100（= 区域全长）
+        assert vc.cutoff == -170.0
+        assert vc.overlap == 50.0  # 100 * 0.5
+        assert vc.constraint_errors() == []
+
+    def test_vc_vowel_region_excludes_consonant(self):
+        u = Timing(100.0, 40.0, -300.0, 0.0, 0.0)  # 元音区 = 300-40 = 260
+        v = Timing(400.0, 60.0, -180.0, 0.0, 0.0)  # 元音起点 460
+        vc = u.vc_timing(v, 0.5, 0.5)
+        assert vc.preutterance == 130.0  # 260 * 0.5
+        assert vc.offset == 400.0 - 130.0  # window_end=400
+        assert vc.consonant == 460.0 - 270.0  # = 区域全长 190
+        assert vc.cutoff == -190.0
+        assert vc.overlap == 65.0
+        assert vc.constraint_errors() == []
+
+    def test_vc_none_when_next_consonant_zero(self):
+        u = Timing(0.0, 0.0, -200.0, 0.0, 0.0)
+        v = Timing(210.0, 0.0, -180.0, 0.0, 0.0)
+        assert u.vc_timing(v, 0.5, 0.5) is None
+
+    def test_vc_none_when_vowel_region_empty(self):
+        u = Timing(0.0, 200.0, -200.0, 0.0, 0.0)  # consonant == |cutoff|
+        v = Timing(210.0, 60.0, -180.0, 0.0, 0.0)
+        assert u.vc_timing(v, 0.5, 0.5) is None
+
+    def test_vc_none_when_window_nonpositive(self):
+        u = Timing(0.0, 0.0, -200.0, 0.0, 0.0)  # offset = 100
+        v = Timing(50.0, 20.0, -180.0, 0.0, 0.0)  # 元音起点 70 < 100
+        assert u.vc_timing(v, 0.5, 0.5) is None
+
+    def test_vc_none_when_pre_exceeds_window(self):
+        u = Timing(0.0, 0.0, -200.0, 0.0, 0.0)  # pre = 100
+        v = Timing(170.0, 25.0, -180.0, 0.0, 0.0)  # 元音起点 195 → window 95 < 100
+        assert u.vc_timing(v, 0.5, 0.5) is None
+
+    def test_vc_ratio_validation(self):
+        u = Timing(0.0, 0.0, -200.0, 0.0, 0.0)
+        v = Timing(210.0, 60.0, -180.0, 0.0, 0.0)
+        with pytest.raises(InvalidInputError):
+            u.vc_timing(v, 1.5, 0.5)
+        with pytest.raises(InvalidInputError):
+            u.vc_timing(v, 0.5, -0.1)
+
+    def test_vc_ratio_boundary_zero_valid(self):
+        # ratio 恰为 0：VC 区 = 下一辅音整段（preutterance=0）
+        u = Timing(0.0, 0.0, -200.0, 0.0, 0.0)
+        v = Timing(210.0, 60.0, -180.0, 0.0, 0.0)
+        vc = u.vc_timing(v, 0.0, 0.0)
+        assert vc is not None
+        assert vc.offset == 200.0
+        assert vc.consonant == 70.0
+        assert vc.cutoff == -70.0
+        assert vc.preutterance == 0.0
+        assert vc.overlap == 0.0
+        assert vc.constraint_errors() == []
+
+    def test_vc_ratio_boundary_one_valid(self):
+        # ratio 恰为 1：offset = 元音起点（窗口 = 全元音尾 + 辅音）
+        u = Timing(0.0, 40.0, -200.0, 0.0, 0.0)  # 元音起点 40
+        v = Timing(210.0, 60.0, -180.0, 0.0, 0.0)
+        vc = u.vc_timing(v, 1.0, 1.0)
+        assert vc is not None
+        assert vc.offset == 40.0
+        assert vc.preutterance == 160.0  # 元音尾 = 200 - 40
+        assert vc.cutoff == -(270.0 - 40.0)
+        assert vc.overlap == 160.0
+        assert vc.constraint_errors() == []
+
+    def test_vc_fractional_vowel_region_generates(self):
+        # 元音区 0.5 采样：仍生成（边界 0 与 1 之间的分数值不可被跳过）
+        u = Timing(0.0, 199.5, -200.0, 0.0, 0.0)
+        v = Timing(210.0, 60.0, -180.0, 0.0, 0.0)
+        vc = u.vc_timing(v, 0.5, 0.5)
+        assert vc is not None
+        assert vc.preutterance == 0.25
+        assert vc.constraint_errors() == []
+
+    def test_vc_fractional_next_consonant_generates(self):
+        # 下一辅音区 0.5 采样：仍生成
+        u = Timing(0.0, 0.0, -200.0, 0.0, 0.0)
+        v = Timing(210.0, 0.5, -180.0, 0.0, 0.0)
+        vc = u.vc_timing(v, 0.5, 0.5)
+        assert vc is not None
+        assert vc.consonant == 110.5  # 270.5 - 100 → 下一元音起点 210.5
+        assert vc.constraint_errors() == []
+
+    def test_vc_window_zero_with_zero_pre_none(self):
+        # window == 0 且 pre == 0：退化窗口，不生成
+        u = Timing(0.0, 0.0, -200.0, 0.0, 0.0)  # 元音尾至 200
+        v = Timing(150.0, 50.0, -100.0, 0.0, 0.0)  # 下一元音起点恰为 200
+        assert u.vc_timing(v, 0.0, 0.0) is None
+
+    def test_vc_window_unit_fraction_generates(self):
+        # 窗口恰为 1.0 采样：仍生成
+        u = Timing(0.0, 199.0, -200.0, 0.0, 0.0)  # 元音区 1.0
+        v = Timing(190.0, 10.5, -100.0, 0.0, 0.0)  # 下一元音起点 200.5
+        vc = u.vc_timing(v, 0.5, 0.5)
+        assert vc is not None
+        assert vc.preutterance == 0.5  # 1.0 * 0.5
+        assert vc.consonant == 1.0  # 窗口 = 200.5 - 199.5
+        assert vc.cutoff == -1.0
+        assert vc.constraint_errors() == []
+
+    def test_vc_pre_equal_window_generates(self):
+        # pre == window（下一元音起点恰为当前窗口末端）：合法边界，仍生成
+        u = Timing(0.0, 0.0, -200.0, 0.0, 0.0)  # pre = 100
+        v = Timing(150.0, 50.0, -100.0, 0.0, 0.0)  # 下一元音起点恰为 200
+        vc = u.vc_timing(v, 0.5, 0.5)
+        assert vc is not None
+        assert vc.offset == 100.0
+        assert vc.consonant == 100.0  # window == pre == 100
+        assert vc.cutoff == -100.0
+        assert vc.preutterance == 100.0
+        assert vc.overlap == 50.0
+        assert vc.constraint_errors() == []
+
+    def test_vc_constraints_on_realistic_pair(self):
+        # 中文 demo 的 ni → hao 相邻对（44100 Hz）
+        u = Timing(2205.0, 11025.0, -35280.0, 4410.0, 4410.0)
+        v = Timing(35280.0, 11025.0, -39690.0, 4410.0, 4410.0)
+        vc = u.vc_timing(v, 0.5, 0.5)
+        assert vc is not None
+        assert vc.constraint_errors() == []
+
+
 class TestConstraints:
     def test_valid_vcv_window(self):
         assert t().constraint_errors() == []

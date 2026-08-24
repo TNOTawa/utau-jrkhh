@@ -1,3 +1,4 @@
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -53,26 +54,31 @@ class App(ctk.CTk):
         toolbar = ctk.CTkFrame(self, height=40, corner_radius=0)
         toolbar.grid(row=0, column=0, columnspan=3, sticky="ew")
         toolbar.grid_columnconfigure(0, weight=0)
-        toolbar.grid_columnconfigure(1, weight=1)
-        toolbar.grid_columnconfigure(2, weight=0)
+        toolbar.grid_columnconfigure(1, weight=0)
+        toolbar.grid_columnconfigure(2, weight=1)
         toolbar.grid_columnconfigure(3, weight=0)
+        toolbar.grid_columnconfigure(4, weight=0)
 
         ctk.CTkButton(toolbar, text="打开音源文件夹", width=130,
                       command=self._on_open_folder).grid(
             row=0, column=0, padx=(10, 5), pady=5)
 
+        self._vcvc_btn = ctk.CTkButton(toolbar, text="生成 CVVC VC", width=120,
+                                       command=self._on_generate_vcvc)
+        self._vcvc_btn.grid(row=0, column=1, padx=5, pady=5)
+
         self._name_label = ctk.CTkLabel(
             toolbar, text="", font=ctk.CTkFont(size=14, weight="bold"))
-        self._name_label.grid(row=0, column=1, padx=10, pady=5, sticky="w")
+        self._name_label.grid(row=0, column=2, padx=10, pady=5, sticky="w")
 
         self._save_btn = ctk.CTkButton(toolbar, text="保存 oto.ini", width=110,
                                        command=self._on_save, state="disabled")
-        self._save_btn.grid(row=0, column=2, padx=5, pady=5)
+        self._save_btn.grid(row=0, column=3, padx=5, pady=5)
 
         ctk.CTkButton(toolbar, text="撤销更改", width=90,
                       fg_color="transparent", border_width=1,
                       command=self._on_undo).grid(
-            row=0, column=3, padx=(5, 10), pady=5)
+            row=0, column=4, padx=(5, 10), pady=5)
 
     def _build_search_bar(self):
         search_frame = ctk.CTkFrame(
@@ -499,6 +505,55 @@ class App(ctk.CTk):
         folder = filedialog.askdirectory(title="选择音源文件夹")
         if folder:
             self._load_bank(Path(folder))
+
+    def _on_generate_vcvc(self):
+        """选择 JRH 母版项目 → 编译 --cvvc → 在 GUI 中打开编译产物目录。"""
+        folder = filedialog.askdirectory(title="选择 JRH 项目文件夹（含 manifest.json）")
+        if not folder:
+            return
+        project_path = Path(folder)
+        if not (project_path / "manifest.json").exists():
+            messagebox.showerror(
+                "不是 JRH 项目",
+                "所选文件夹缺少 manifest.json。\n"
+                "请选择 JRH 母版项目（如 x.jrh），而非普通音源文件夹。")
+            return
+        self._vcvc_btn.configure(state="disabled", text="编译中...")
+        threading.Thread(
+            target=self._vcvc_worker, args=(project_path,), daemon=True).start()
+
+    def _vcvc_worker(self, project_path: Path):
+        """后台线程执行 jrh compile --cvvc（进程内复用 CLI，主线程零阻塞）。"""
+        import contextlib
+        import io
+
+        from jrh.cli.main import run_cli
+
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(buf):
+                code = run_cli(["compile", str(project_path), "--cvvc"])
+            detail = buf.getvalue().strip()
+        except Exception as exc:  # noqa: BLE001 —— GUI 侧意外异常显式展示
+            code, detail = 1, f"{type(exc).__name__}: {exc}"
+        self.after(0, lambda: self._vcvc_done(project_path, code, detail))
+
+    def _vcvc_done(self, project_path: Path, code: int, detail: str):
+        self._vcvc_btn.configure(state="normal", text="生成 CVVC VC")
+        if code != 0:
+            messagebox.showerror(
+                "CVVC 编译失败", detail or f"编译退出码 {code}")
+            return
+        build_dir = project_path / "builds" / "openutau-jrh"
+        if not (build_dir / "oto.ini").exists():
+            messagebox.showerror(
+                "编译产物缺失", f"未找到编译产物：\n{build_dir}")
+            return
+        self._load_bank(build_dir)
+        messagebox.showinfo(
+            "完成",
+            "CVVC 编译完成，已打开产物目录（含 VC 衔接音素条目，如 a k）。\n"
+            f"{build_dir}")
 
     def _on_save(self):
         if not self.oto_bank.folder_path:

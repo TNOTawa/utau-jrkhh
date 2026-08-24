@@ -30,7 +30,7 @@ class TestFullLifecycle:
         assert (out / "alias-map.json").exists()
         assert (out / "build-report.json").exists()
         for sent in proj2.sentences_sorted():
-            assert (out / sentence_wav_name(sent.sentence_id)).exists()
+            assert (out / sentence_wav_name(proj2, sent)).exists()
 
         # oto 条目数与 report 一致
         oto = read_oto(out / "oto.ini")
@@ -85,7 +85,7 @@ class TestSourceTimeline:
             unit = proj.get_unit(s, u)  # 反查成功
             sent = proj.get_sentence(s)
             # 产物中的 WAV = 句子切片
-            assert info["wav"] == sentence_wav_name(s)
+            assert info["wav"] == sentence_wav_name(proj, sent)
             assert proj.get_asset(sent.asset_id).id == sent.asset_id
             # 来源单元确实指向该 asset
             assert unit.label == info["source_label"]
@@ -101,7 +101,7 @@ class TestSourceTimeline:
             for aid in sorted(proj.assets)
         }
         for sent in proj.sentences_sorted():
-            exported = read_wav_samples(out / sentence_wav_name(sent.sentence_id))
+            exported = read_wav_samples(out / sentence_wav_name(proj, sent))
             expected = asset_samples[sent.asset_id][sent.start_sample : sent.end_sample]
             assert exported == expected, f"sentence {sent.sentence_id} 切片不一致"
 

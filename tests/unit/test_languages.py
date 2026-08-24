@@ -43,6 +43,49 @@ class TestPinyinPack:
         assert all(self.pack.final_vowel(s) == "ao" for s in subs)
         assert subs == sorted(subs)
 
+    def test_is_helper_false(self):
+        assert not self.pack.is_helper("hao")
+        assert not self.pack.is_helper("a")
+
+    def test_vc_vowel(self):
+        assert self.pack.vc_vowel("hao") == "ao"
+        assert self.pack.vc_vowel("a") == "a"
+
+    def test_vc_vowel_presamp_short_ids(self):
+        # VC 元音侧 = presamp 短 ID（与 final_vowel 语义不同：保留韵尾/变体）
+        assert self.pack.vc_vowel("an") == "an"
+        assert self.pack.vc_vowel("ang") == "ang"
+        assert self.pack.vc_vowel("zhi") == "ir"
+        assert self.pack.vc_vowel("zi") == "i0"
+        assert self.pack.vc_vowel("ye") == "e0"
+        assert self.pack.vc_vowel("yan") == "en0"
+        assert self.pack.vc_vowel("jun") == "vn"
+        assert self.pack.vc_vowel("er") == "er"
+        assert self.pack.vc_vowel("yo") is None  # 枚举外 → 不生成 VC
+        # final_vowel 语义不变（丢 n/ng 韵尾的韵母近似，供 selection 用）
+        assert self.pack.final_vowel("an") == "a"
+
+    def test_vc_consonant(self):
+        assert self.pack.vc_consonant("hao") == "h"
+        assert self.pack.vc_consonant("zhuang") == "zh"
+        assert self.pack.vc_consonant("a") is None
+
+    def test_vc_consonant_presamp_short_ids(self):
+        # VC 辅音侧 = presamp 声母短 ID（组合声母 ly/xy/hw/…；y/w 作声母）
+        assert self.pack.vc_consonant("li") == "ly"
+        assert self.pack.vc_consonant("ni") == "ny"
+        assert self.pack.vc_consonant("mi") == "my"
+        assert self.pack.vc_consonant("xi") == "xy"
+        assert self.pack.vc_consonant("hua") == "hw"
+        assert self.pack.vc_consonant("shua") == "shw"
+        assert self.pack.vc_consonant("suan") == "sw"
+        assert self.pack.vc_consonant("xue") == "xw"
+        assert self.pack.vc_consonant("yu") == "v"
+        assert self.pack.vc_consonant("ya") == "y"
+        assert self.pack.vc_consonant("wa") == "w"
+        assert self.pack.vc_consonant("er") is None
+        assert self.pack.vc_consonant("yo") is None
+
     def test_lyric_to_units_greedy(self):
         assert self.pack.lyric_to_units("nihao") == ["ni", "hao"]
         assert self.pack.lyric_to_units("xian") == ["xian"]
@@ -96,6 +139,26 @@ class TestRomajiPack:
     def test_validate_unit(self):
         assert self.pack.validate_unit("ko")
         assert not self.pack.validate_unit("xy")
+
+    def test_is_helper(self):
+        assert self.pack.is_helper("xtsu")
+        assert self.pack.is_helper("xya")
+        assert not self.pack.is_helper("ko")
+        assert not self.pack.is_helper("n")
+        assert not self.pack.is_helper("")
+
+    def test_vc_vowel(self):
+        assert self.pack.vc_vowel("ko") == "o"
+        assert self.pack.vc_vowel("a") == "a"
+        assert self.pack.vc_vowel("n") is None
+        assert self.pack.vc_vowel("xtsu") is None  # 辅助拍误报元音（末字母 u）被拦截
+
+    def test_vc_consonant(self):
+        assert self.pack.vc_consonant("ko") == "k"
+        assert self.pack.vc_consonant("kya") == "ky"
+        assert self.pack.vc_consonant("a") is None
+        assert self.pack.vc_consonant("n") == "n"  # ん 全辅音拍整体作 C 侧
+        assert self.pack.vc_consonant("xtsu") is None
 
 
 class TestRegistry:

@@ -46,6 +46,7 @@ TARGETS: dict[str, list[str]] = {
         "tests/integration/test_determinism.py",
         "tests/unit/test_validate.py",
         "tests/unit/test_boundaries.py",
+        "tests/unit/test_vc_compile.py",
     ],
     "jrh/core/analysis.py": [
         "tests/unit/test_analysis.py",
@@ -88,21 +89,47 @@ Mutant: TypeAlias = tuple[tuple[int, int, type], MutantFactory]
 EQUIVALENT_WHITELIST: list[tuple[str, str, str]] = [
     (
         "jrh/core/compile_engine.py",
-        "const 0→1 L29",
+        "const 0→1 L33",
         "等价：_KIND_RANK 数值变化后，别名字典序仍给出相同条目顺序",
     ),
     (
         "jrh/core/compile_engine.py",
-        "const 1→0 L29",
+        "const 1→0 L33",
         "等价：见上（full 与 transition 同秩时按别名排序，顺序不变）",
     ),
     (
         "jrh/core/compile_engine.py",
-        "const 2→3 L29",
+        "const 2→3 L33",
         "等价：见上（body 与 cv 同秩时按别名排序，顺序不变）",
     ),
-    ("jrh/core/compile_engine.py", "const 3→4 L29", "等价：见上（仅改变 cv 秩数值，相对顺序不变）"),
-    ("jrh/core/compile_engine.py", "const 9→10 L232", "等价：kind 只取已知四值，fallback 永不触发"),
+    (
+        "jrh/core/compile_engine.py",
+        "const 4→5 L33",
+        "等价：vc 已为最大秩，+1 后与其他 kind 的相对顺序不变",
+    ),
+    ("jrh/core/compile_engine.py", "const 9→10 L255", "等价：kind 只取已知五值，fallback 永不触发"),
+    (
+        "jrh/core/compile_engine.py",
+        "const 1→0 L298",
+        "等价：组序回退值永不可达（辅音侧必为启用单元，其坐标必在 effective_group_order 中）",
+    ),
+    (
+        "jrh/core/compile_engine.py",
+        "const 30→31 L298",
+        "等价：见上（回退仅防御性，永不触发）",
+    ),
+    (
+        "jrh/core/compile_engine.py",
+        "binop Sub→Add L302",
+        "等价：起点偏移到 nxt 只多检查辅助拍（跳过）或 nxt 自身——(nxt,nxt) 自配对经 vc_timing 恒 None"
+        "（窗口≤0）；真实 (U,V) 由 (U,辅助拍) 配对的向前借位产出，输出不变",
+    ),
+    (
+        "jrh/core/compile_engine.py",
+        "const 1→0 L302",
+        "等价：range 停止/步进 -1→0 使向前借位漏检 j=0 或空转，但 (U,辅助拍) 配对的向后借位"
+        "已产出同一归一化对（镜像补偿），输出不变",
+    ),
     (
         "jrh/core/analysis.py",
         "const 0→1 L90",
@@ -128,7 +155,7 @@ EQUIVALENT_WHITELIST: list[tuple[str, str, str]] = [
     ),
     (
         "jrh/core/model.py",
-        "bool True→False L223",
+        "bool True→False L258",
         "等价：Unit.enabled 默认值从不被使用（构造与 from_dict 均显式传值）",
     ),
     (
