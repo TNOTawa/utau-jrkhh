@@ -1,0 +1,2 @@
+# 统一 LF 行尾：Windows CI 检出默认 CRLF 会破坏 golden 字节一致性测试
+* text=auto eol=lf
